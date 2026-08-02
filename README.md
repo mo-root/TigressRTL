@@ -9,10 +9,8 @@ against a real compiler, not just eyeballed.
 ## Requirements
 
 - **Python 3.10+**
-- **Ollama**, running locally, with a tool-capable model pulled:
-  `ollama pull devstral` (the default — see [Design notes](#design-notes) for
-  why). `ollama pull llama3.2` also works as a faster, less reliable
-  fallback (`--model llama3.2`).
+- **Ollama**, running locally, with a tool-capable model pulled — see
+  [Installing Ollama](#installing-ollama) below.
 - **Icarus Verilog**, for the `build_verilog` tool: `apt install iverilog`
   on Debian/Ubuntu, or `winget install Icarus.Verilog` on Windows (the
   Windows installer does not add itself to `PATH`; `src/tools.py` falls
@@ -43,6 +41,43 @@ source .venv/bin/activate
 pip install --upgrade pip
 pip install -e .
 ```
+
+## Installing Ollama
+
+The agent talks to a local Ollama server for all model inference — install
+it before running the agent.
+
+**Windows:** download and run the installer from
+[ollama.com/download/windows](https://ollama.com/download/windows) (or
+`winget install Ollama.Ollama`). It puts `ollama` on `PATH` and runs as a
+background service automatically — no separate `ollama serve` step needed.
+
+**Linux:**
+
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+```
+
+This is the official install script — it installs the `ollama` binary and
+sets it up as a `systemd` service that starts automatically.
+
+### Pulling a model
+
+Once Ollama is installed and running, pull a tool-capable model:
+
+```bash
+ollama pull devstral   # default in model.py — see Design notes for why
+ollama pull llama3.2   # faster, less reliable fallback (--model llama3.2)
+```
+
+Newer, larger alternatives are also available if you want to try them:
+
+```bash
+ollama pull devstral-small-2   # updated 24B model, larger 384K context window
+ollama pull devstral-2         # 123B flagship — needs significantly more RAM/VRAM
+```
+
+Run `ollama list` to confirm what's pulled locally.
 
 ## Run
 
