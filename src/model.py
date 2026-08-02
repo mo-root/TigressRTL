@@ -4,10 +4,6 @@ from langchain_ollama import ChatOllama
 # (tools.py, rtl_agent.py) talks to `build_llm()`'s return value, not to
 # ChatOllama directly, so switching providers later only means editing here.
 #
-# codellama produces good plain-chat RTL quality, but `ollama show codellama`
-# reports Capabilities: completion only — no `tools` — so Ollama rejects any
-# request with .bind_tools() attached (400 "does not support tools").
-#
 # qwen2.5-coder *claims* tool support (`ollama show qwen2.5-coder` lists
 # completion, tools, insert) but empirically does not reliably use it: tested
 # directly against both the raw `ollama` library and langchain_ollama, it

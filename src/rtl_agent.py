@@ -11,13 +11,13 @@ from tools import TOOLS, TOOL_FUNCTIONS
 sys.stdout.reconfigure(encoding="utf-8")
 
 # --model lets you swap between locally-pulled Ollama models (e.g. llama3.2,
-# codellama, qwen2.5-coder) without editing any file — useful since RTL
-# quality and tool-calling reliability vary a lot between models (see
-# model.py and README.md).
+# qwen2.5-coder) without editing any file — useful since RTL quality and
+# tool-calling reliability vary a lot between models (see model.py and
+# README.md).
 parser = argparse.ArgumentParser(description="Chat with a SystemVerilog RTL design assistant.")
 parser.add_argument(
     "--model", default=None,
-    help="Ollama model to use, e.g. codellama, llama3.2 (must already be pulled via `ollama pull`)",
+    help="Ollama model to use, e.g. llama3.2, qwen2.5-coder (must already be pulled via `ollama pull`)",
 )
 args = parser.parse_args()
 
