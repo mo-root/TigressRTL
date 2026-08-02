@@ -1,8 +1,10 @@
 import argparse
+import dataclasses
 import sys
 
 from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage
 
+from config import DEFAULT_CONFIG_PATH, load_config
 from model import build_llm, SYSTEM_PROMPT, PLANNING_INSTRUCTION
 from tools import TOOLS, TOOL_FUNCTIONS
 
@@ -10,26 +12,29 @@ from tools import TOOLS, TOOL_FUNCTIONS
 # force UTF-8 output so nothing gets garbled.
 sys.stdout.reconfigure(encoding="utf-8")
 
-# --model lets you swap between locally-pulled Ollama models (e.g. llama3.2,
-# qwen2.5-coder) without editing any file — useful since RTL quality and
-# tool-calling reliability vary a lot between models (see model.py and
-# README.md).
 parser = argparse.ArgumentParser(description="Chat with a SystemVerilog RTL design assistant.")
 parser.add_argument(
+    "--config", default=str(DEFAULT_CONFIG_PATH),
+    help="Path to a YAML config file (see configs/default.yaml)",
+)
+parser.add_argument(
     "--model", default=None,
-    help="Ollama model to use, e.g. llama3.2, qwen2.5-coder (must already be pulled via `ollama pull`)",
+    help="Override the model from the config, e.g. llama3.2, qwen2.5-coder "
+         "(must already be pulled via `ollama pull`)",
 )
 args = parser.parse_args()
 
-# Bounded retry cap for the build-failure nudge below — without a cap, a
-# model that can never actually fix a given error would loop forever.
-MAX_BUILD_RETRIES = 3
+config = load_config(args.config)
+if args.model:
+    # A one-off override shouldn't require writing a new YAML file — this
+    # takes precedence over whatever the config file says.
+    config = dataclasses.replace(config, model=args.model)
 
 # `llm` is our handle to the model. `.bind_tools(TOOLS)` returns a new
 # runnable that knows about each tool's schema and may respond with
 # tool_calls instead of (or alongside) plain text — the model itself never
 # executes anything, it only ever *requests* a call.
-llm = build_llm(args.model)
+llm = build_llm(config)
 llm_with_tools = llm.bind_tools(TOOLS)
 
 # `messages` is the full conversation history sent on every request —
@@ -41,7 +46,7 @@ llm_with_tools = llm.bind_tools(TOOLS)
 #   ToolMessage(...)   - a tool's result, tagged with which call it answers
 messages = [SystemMessage(content=SYSTEM_PROMPT)]
 
-print("Chatting with", args.model or "the default model", "— a SystemVerilog RTL design assistant.")
+print("Chatting with", config.model, "— a SystemVerilog RTL design assistant.")
 print("Type 'exit' or 'quit' to stop.\n")
 
 while True:
@@ -92,7 +97,7 @@ while True:
             # turn would hit the same wall.
             if "does not support tools" in str(e):
                 print(
-                    f"\nError: model '{args.model or 'the default model'}' does not "
+                    f"\nError: model '{config.model}' does not "
                     "support tool calling in Ollama.\nThis agent's tools (write_file, "
                     "read_file, edit_file_block, list_directory, build_verilog) require "
                     "a tool-capable model.\nTry --model llama3.2 instead — see "
@@ -112,11 +117,11 @@ while True:
             # write_file/edit_file_block in that same response — auto-build
             # enforces that a failure is *seen*, but nothing forces it to be
             # *acted on*. So otherwise, nudge for a genuine fix attempt and
-            # keep the loop going, up to MAX_BUILD_RETRIES times.
-            if build_failed and build_retry_count < MAX_BUILD_RETRIES:
+            # keep the loop going, up to config.max_build_retries times.
+            if build_failed and build_retry_count < config.max_build_retries:
                 build_retry_count += 1
                 print(f"[Retry] Build is still failing and no fix was applied — "
-                      f"forcing attempt {build_retry_count}/{MAX_BUILD_RETRIES}.")
+                      f"forcing attempt {build_retry_count}/{config.max_build_retries}.")
                 messages.append(HumanMessage(content=(
                     "The last build_verilog result was a failure, and you did not "
                     "call write_file or edit_file_block to actually apply a fix — "
