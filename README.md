@@ -66,7 +66,7 @@ sets it up as a `systemd` service that starts automatically.
 Once Ollama is installed and running, pull a tool-capable model:
 
 ```bash
-ollama pull devstral   # default in model.py — see Design notes for why
+ollama pull devstral   # default in configs/default.yaml — see Design notes for why
 ollama pull llama3.2   # faster, less reliable fallback (--model llama3.2)
 ```
 
@@ -82,9 +82,19 @@ Run `ollama list` to confirm what's pulled locally.
 ## Run
 
 ```powershell
-python src/rtl_agent.py                  # uses the default model (devstral)
-python src/rtl_agent.py --model llama3.2 # override for one run
+python src/rtl_agent.py                                    # uses configs/default.yaml
+python src/rtl_agent.py --config configs/my-experiment.yaml # a different config file
+python src/rtl_agent.py --model llama3.2                    # override just the model for one run
 ```
+
+Settings (model, context window, build-retry cap, and more to come) are
+loaded from a YAML config file — `configs/default.yaml` unless `--config`
+points elsewhere. `--model` always wins over whatever the config says, so a
+one-off override doesn't require creating a new file. To run an experiment
+with different settings, copy `configs/default.yaml`, edit the copy, and
+pass it via `--config` — see `src/config.py`'s `AgentConfig` for the full
+list of fields and a typo'd key will raise a clear error instead of
+silently using the wrong default.
 
 Type a request (e.g. *"Write a SystemVerilog module for a 4-bit synchronous
 up-counter with active-low reset and enable."*) and the agent will plan,
@@ -104,8 +114,12 @@ follows — see [Design notes](#design-notes) below.
 
 ## Architecture
 
-- **`src/model.py`** — the one swappable model/provider point (`build_llm()`,
-  system prompt, default model).
+- **`src/config.py`** / **`configs/default.yaml`** — `AgentConfig`, a small
+  dataclass (`model`, `num_ctx`, `max_build_retries`) loaded from YAML via
+  `load_config()`. The single source of truth for experiment settings —
+  see [Run](#run) above.
+- **`src/model.py`** — the one swappable model/provider point (`build_llm()`
+  takes an `AgentConfig`, plus the system prompt).
 - **`src/tools.py`** — the five tools the agent can call: `write_file`,
   `read_file`, `edit_file_block`, `list_directory`, `build_verilog`. All of
   them are sandboxed to `src/generated/` — a model-supplied path is
@@ -114,8 +128,8 @@ follows — see [Design notes](#design-notes) below.
 - **`src/rtl_agent.py`** — the interactive loop: a planning call with no
   tools bound (so the model is structurally unable to act before planning),
   then a ReAct tool-calling loop that auto-runs `build_verilog` after every
-  write/edit and forces a bounded number of fix attempts (`MAX_BUILD_RETRIES
-  = 3`) if a build fails.
+  write/edit and forces a bounded number of fix attempts
+  (`config.max_build_retries`) if a build fails.
 
 ## Design notes
 
