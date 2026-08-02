@@ -2,6 +2,10 @@
 # field docs and rationale. Copy this file to make an experiment-specific
 # config (e.g. configs/llama3.2-fast.yaml) and pass it via --config.
 
+# Options verified to work with this agent (see README.md in this
+# directory for context limits and tool-calling reliability notes):
+#   devstral (default), devstral-small-2, llama3.2, qwen2.5-coder
+# Not usable: llama2 (no tool-calling support at all).
 model: devstral
 num_ctx: 8192
 max_build_retries: 3
