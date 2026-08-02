@@ -1,39 +1,13 @@
 from langchain_ollama import ChatOllama
 
+from config import AgentConfig
+
 # The one swappable model/provider point in this project — everything else
 # (tools.py, rtl_agent.py) talks to `build_llm()`'s return value, not to
 # ChatOllama directly, so switching providers later only means editing here.
-#
-# qwen2.5-coder *claims* tool support (`ollama show qwen2.5-coder` lists
-# completion, tools, insert) but empirically does not reliably use it: tested
-# directly against both the raw `ollama` library and langchain_ollama, it
-# dumps the tool call as a raw JSON string in the response's plain text
-# content instead of populating the structured tool_calls field — so
-# response.tool_calls comes back empty/None and nothing actually executes.
-# Declared capability metadata isn't proof of working behavior — verify
-# empirically before trusting it.
-#
-# llama3.2 reliably produces structured tool_calls, but empirically fails in
-# other ways: garbled/truncated multi-line content in tool-call arguments,
-# narrating fake pseudo-tool-calls as plain text instead of invoking them,
-# and confidently hallucinating tool results that contradict what the tool
-# actually returned in the same response.
-#
-# devstral (Mistral's model purpose-built for agentic coding, via the
-# OpenHands scaffold) is the first model tested here with none of those
-# problems in a full end-to-end run: real structured tool_calls with
-# complete, untruncated, valid SystemVerilog content; build succeeded on
-# the first try; and its final answer was a byte-for-byte accurate
-# description of what was actually written to disk. It's ~14GB and
-# noticeably slower per turn on limited-GPU hardware (mostly CPU inference),
-# but the reliability difference is large enough to make it the default.
-# --model llama3.2 still works if speed matters more than reliability for a
-# given session.
-DEFAULT_MODEL = "devstral"
-
-# Sized up from a typical 4096 default — generated SystemVerilog modules
-# tend to run longer than plain prose/chat content that value is tuned for.
-NUM_CTX = 8192
+# Model choice and context window live in AgentConfig (see config.py) rather
+# than as constants here, so they're driven by the YAML config instead of
+# requiring a code edit to change.
 
 SYSTEM_PROMPT = (
     "You are an expert SystemVerilog RTL designer. Write clean, "
@@ -62,12 +36,8 @@ PLANNING_INSTRUCTION = (
 )
 
 
-def build_llm(model_name: str | None = None) -> ChatOllama:
-    # `model_name=None` means "use the default" — kept as a parameter
-    # (rather than always reading DEFAULT_MODEL directly) so callers like
-    # rtl_agent.py's --model flag can override it per run without touching
-    # this file.
+def build_llm(config: AgentConfig) -> ChatOllama:
     return ChatOllama(
-        model=model_name or DEFAULT_MODEL,
-        num_ctx=NUM_CTX,
+        model=config.model,
+        num_ctx=config.num_ctx,
     )
