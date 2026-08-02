@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tigressrtl"
+version = "0.1.0"
+description = "An agent that generates, writes, and compiles SystemVerilog RTL."
+requires-python = ">=3.10"
+dependencies = [
+    "langchain-core",
+    "langchain-ollama",
+]
+
+[tool.setuptools]
+py-modules = ["model", "tools", "rtl_agent"]
+
+[tool.setuptools.package-dir]
+"" = "src"
