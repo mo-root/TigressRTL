@@ -112,6 +112,40 @@ While it runs, three prefixes tell you what's actually happening:
 Always trust `[Result]`/`[Auto-Build]` over the `Assistant:` text that
 follows — see [Design notes](#design-notes) below.
 
+## Config options
+
+`configs/default.yaml` (or any file passed via `--config`) accepts the
+fields defined by `AgentConfig` in `src/config.py`:
+
+| Field | Default | What it controls |
+|---|---|---|
+| `model` | `devstral` | Which pulled Ollama model to use. |
+| `num_ctx` | `8192` | Context window size, in tokens, given to Ollama. Can be set anywhere up to the chosen model's maximum context length (see table below) — larger values use more RAM/VRAM and run slower. |
+| `max_build_retries` | `3` | How many times the agent is forced to retry after a build failure it didn't actually fix, before giving up for that turn. Any non-negative integer. |
+
+### Models and their maximum context length
+
+Verified locally via `ollama show <model>`:
+
+| Model | Max context | Tool-calling | Notes |
+|---|---|---|---|
+| `devstral` (default) | 131072 (128K) | Reliable | See [Design notes](#design-notes) for why this is the default. |
+| `llama3.2` | 131072 (128K) | Unreliable | Garbled/truncated tool-call arguments, fabricated results — see Design notes. |
+| `qwen2.5-coder` | 32768 (32K) | Claims `tools`, doesn't use them | Dumps the call as plain-text JSON instead of populating `tool_calls`. |
+| `llama2` | 4096 (4K) | None | No `tools` capability at all — Ollama rejects any request with tools bound. Not usable with this agent regardless of `num_ctx`. |
+
+Newer alternatives from [Installing Ollama](#installing-ollama), per
+[ollama.com](https://ollama.com/library) (not pulled/verified locally):
+
+| Model | Max context (per ollama.com) |
+|---|---|
+| `devstral-small-2` | ~384K |
+| `devstral-2` | ~256K |
+
+Whatever model you choose, `num_ctx` in your config must not exceed its
+maximum context length above — Ollama will error or silently clamp it
+otherwise.
+
 ## Architecture
 
 - **`src/config.py`** / **`configs/default.yaml`** — `AgentConfig`, a small
