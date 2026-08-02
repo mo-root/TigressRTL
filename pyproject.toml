@@ -10,10 +10,11 @@ requires-python = ">=3.10"
 dependencies = [
     "langchain-core",
     "langchain-ollama",
+    "pyyaml",
 ]
 
 [tool.setuptools]
-py-modules = ["model", "tools", "rtl_agent"]
+py-modules = ["model", "tools", "rtl_agent", "config"]
 
 [tool.setuptools.package-dir]
 "" = "src"
