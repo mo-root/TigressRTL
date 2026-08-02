@@ -8,19 +8,39 @@ against a real compiler, not just eyeballed.
 
 ## Requirements
 
+- **Python 3.10+**
 - **Ollama**, running locally, with a tool-capable model pulled:
   `ollama pull devstral` (the default — see [Design notes](#design-notes) for
   why). `ollama pull llama3.2` also works as a faster, less reliable
   fallback (`--model llama3.2`).
-- **Icarus Verilog**, for the `build_verilog` tool. On Windows:
-  `winget install Icarus.Verilog` — note the installer does not add itself
-  to `PATH`; `src/tools.py` falls back to the default install location if
-  `iverilog` isn't found on `PATH`.
-- Python 3.10+.
+- **Icarus Verilog**, for the `build_verilog` tool: `apt install iverilog`
+  on Debian/Ubuntu, or `winget install Icarus.Verilog` on Windows (the
+  Windows installer does not add itself to `PATH`; `src/tools.py` falls
+  back to the default install location if `iverilog` isn't found on
+  `PATH`).
 
-## Install
+These are all system-level installs — a Python virtual environment (below)
+only isolates the Python packages (`langchain-core`, `langchain-ollama`),
+not Ollama or Icarus Verilog, so both still need to be set up on whatever
+machine you're actually running on, local or remote.
 
-```powershell
+## Setup
+
+Works the same whether you're setting this up locally or on a freshly
+cloned remote server:
+
+```bash
+git clone <this-repo-url>
+cd TigressRTL
+
+python -m venv .venv
+
+# Linux/macOS
+source .venv/bin/activate
+# Windows
+.venv\Scripts\activate
+
+pip install --upgrade pip
 pip install -e .
 ```
 
