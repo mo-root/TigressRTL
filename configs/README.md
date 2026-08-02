@@ -23,17 +23,18 @@ Verified locally via `ollama show <model>`:
 | Model | Max context | Tool-calling | Notes |
 |---|---|---|---|
 | `devstral` (default) | 131072 (128K) | Reliable | See the root [README's Design notes](../README.md#design-notes) for why this is the default. |
+| `devstral-small-2` | 393216 (384K) | Reliable | Newer 24B model, larger context than `devstral`. Real structured `tool_calls`, correctly self-corrected a build failure in testing. Also has `vision` capability (unused by this agent) and a lower built-in default temperature (0.15) than `devstral`. |
 | `llama3.2` | 131072 (128K) | Unreliable | Garbled/truncated tool-call arguments, fabricated results — see Design notes. |
 | `qwen2.5-coder` | 32768 (32K) | Claims `tools`, doesn't use them | Dumps the call as plain-text JSON instead of populating `tool_calls`. |
 | `llama2` | 4096 (4K) | None | No `tools` capability at all — Ollama rejects any request with tools bound. Not usable with this agent regardless of `num_ctx`. |
 
-Newer alternatives from the root README's
+Newer alternative from the root README's
 [Installing Ollama](../README.md#installing-ollama) section, per
-[ollama.com](https://ollama.com/library) (not pulled/verified locally):
+[ollama.com](https://ollama.com/library) (not pulled/verified locally — much
+larger, 75GB):
 
 | Model | Max context (per ollama.com) |
 |---|---|
-| `devstral-small-2` | ~384K |
 | `devstral-2` | ~256K |
 
 Whatever model you choose, `num_ctx` in your config must not exceed its

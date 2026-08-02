@@ -66,15 +66,15 @@ sets it up as a `systemd` service that starts automatically.
 Once Ollama is installed and running, pull a tool-capable model:
 
 ```bash
-ollama pull devstral   # default in configs/default.yaml — see Design notes for why
-ollama pull llama3.2   # faster, less reliable fallback (--model llama3.2)
+ollama pull devstral          # default in configs/default.yaml — see Design notes for why
+ollama pull devstral-small-2  # newer 24B model, larger 384K context window (--model devstral-small-2)
+ollama pull llama3.2          # faster, less reliable fallback (--model llama3.2)
 ```
 
-Newer, larger alternatives are also available if you want to try them:
+A much larger alternative is also available if you have the RAM/VRAM for it:
 
 ```bash
-ollama pull devstral-small-2   # updated 24B model, larger 384K context window
-ollama pull devstral-2         # 123B flagship — needs significantly more RAM/VRAM
+ollama pull devstral-2   # 123B flagship, 75GB — not verified locally, see configs/README.md
 ```
 
 Run `ollama list` to confirm what's pulled locally.
