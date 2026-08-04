@@ -3,3 +3,4 @@ __pycache__/
 generated/
 *.egg-info/
 .venv/
+benchmark_runs/
