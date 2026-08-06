@@ -117,12 +117,13 @@ documented in [`configs/README.md`](configs/README.md).
 
 ## Benchmarking
 
-`test/run_benchmark.py` runs the agent against the spec-to-rtl problems from
-[NVlabs/verilog-eval](https://github.com/NVlabs/verilog-eval) — **generation
-only**, it does not (yet) check the output against the dataset's reference
-solutions or run any simulation/scoring. It exists to produce raw transcripts
-and generated code for comparing setups; validating that output is separate,
-future work.
+Two scripts, kept separate since generation and validation are different
+concerns run at different times: `test/run_benchmark.py` runs the agent
+against the spec-to-rtl problems from
+[NVlabs/verilog-eval](https://github.com/NVlabs/verilog-eval) and saves
+whatever code it produced; `test/run_validation.py` takes that output and
+actually checks it — compiling and simulating each generated module against
+the dataset's own reference solution and testbench.
 
 Clone the dataset anywhere (it's not vendored into this repo, same as
 Ollama/Icarus Verilog):
@@ -169,6 +170,37 @@ timestamped directory. See `--help` for `--problems` (filter by name/glob),
 `--timeout` (per-problem subprocess timeout, none by default), and `--python`
 (interpreter to launch `rtl_agent.py` with).
 
+### Validating generated code
+
+`test/run_validation.py` takes a `run_benchmark.py` output directory and, for
+every problem, compiles its `generated/*.sv` files together with the
+dataset's `<problem>_ref.sv` and `<problem>_test.sv`, runs the simulation,
+and parses the testbench's own `Mismatches: N in M samples` summary:
+
+```bash
+python test/run_validation.py --run-dir benchmark_runs/2026-08-04_23-45-28 \
+    --dataset-dir verilog-eval/dataset_spec-to-rtl
+```
+
+Writes `validation.json` (`status`, `mismatches`, `samples`, `duration_s`)
+and `validation.log` (raw compile + simulation output) alongside each
+problem's existing `transcript.log`. `status` is one of: `pass`, `fail`
+(compiled and ran, but mismatched the reference), `compile_error`,
+`sim_timeout` (either the subprocess itself or the testbench's own built-in
+simulated-time cutoff), `no_generated_code`, or `missing_dataset_files`.
+Already-validated problems are skipped on a re-run unless `--overwrite` is
+passed. `--configs`/`--problems` filter which config-stems/problems to
+validate, same as `run_benchmark.py`.
+
+**This is the trustworthy pass/fail signal — not `run_benchmark.py`'s own
+`transcript.log`.** `build_verilog` (the tool the agent itself calls) only
+compiles one file at a time, so if the agent writes an extra file alongside
+`TopModule.sv` (e.g. its own self-authored testbench), that file's
+`build_verilog` call fails with a spurious "Unknown module type" error
+(it can't see `TopModule`, which lives in a different file) even when
+`TopModule.sv` itself is completely correct. Only `run_validation.py`'s real
+multi-file compile against the actual dataset testbench reflects the truth.
+
 ## Architecture
 
 - **`src/config.py`** / **`configs/default.yaml`** — `AgentConfig`, a small
@@ -190,6 +222,10 @@ timestamped directory. See `--help` for `--problems` (filter by name/glob),
 - **`test/run_benchmark.py`** — sweeps `rtl_agent.py` (one fresh subprocess
   per problem) over the verilog-eval dataset across one or more configs —
   see [Benchmarking](#benchmarking) above.
+- **`test/run_validation.py`** — compiles and simulates each generated
+  problem against the dataset's reference solution and testbench, recording
+  a real pass/fail — see [Validating generated code](#validating-generated-code)
+  above.
 
 ## Design notes
 
@@ -220,3 +256,15 @@ extending it:
   in `src/tools.py` strips a redundant leading anchor/`generated` segment
   before resolving, while still rejecting genuine escape attempts like
   `../../etc/passwd`.
+- **`build_verilog`'s single-file compile is a real blind spot, not just a
+  simplification.** It only ever compiles the one file it's given. If the
+  agent writes a second file that references the first (most commonly, a
+  self-authored testbench instantiating `TopModule`), `build_verilog` on
+  that second file reports a spurious "Unknown module type" failure — the
+  referenced module is completely real, just defined in a file this
+  particular compile invocation was never given. Confirmed directly: a
+  `transcript.log` showing repeated `build_verilog` failures on
+  `TopModule_tb.sv` turned out to have a perfectly correct `TopModule.sv`
+  the whole time — `test/run_validation.py`'s real multi-file compile
+  against the dataset's actual testbench is what caught this, not anything
+  in the agent's own transcript.
