@@ -156,6 +156,48 @@ def validate_problem(problem: str, problem_dir: Path, dataset_dir: Path, timeout
     return result, "\n".join(log_parts)
 
 
+# "Build failure" = never compiled at all. "Functional failure" = compiled
+# and ran, but mismatched the reference. Everything else (sim timeout,
+# nothing generated, dataset files missing, unparseable testbench output)
+# is neither — surfaced separately so it isn't silently lost or miscounted
+# as one of the other two.
+BUILD_FAILURE_STATUSES = ("compile_error", "compile_timeout")
+OTHER_STATUSES = ("sim_timeout", "no_generated_code", "missing_dataset_files", "unknown")
+
+
+def print_summary(run_dir: Path, summary: dict) -> None:
+    print(f"\n{'=' * 60}")
+    print("Validation Summary")
+    print(f"{'=' * 60}")
+    print(f"Run directory: {run_dir}")
+
+    for config_name, by_status in summary.items():
+        total = sum(len(v) for v in by_status.values())
+        passed = len(by_status.get("pass", []))
+        rate = f"{100 * passed / total:.0f}%" if total else "n/a"
+
+        print(f"\n--- {config_name} ---")
+        print(f"Pass: {passed}/{total} ({rate})")
+
+        build_failed = [(p, s) for s in BUILD_FAILURE_STATUSES for p, r in by_status.get(s, [])]
+        if build_failed:
+            print(f"\nBuild failures ({len(build_failed)}) — never compiled:")
+            for problem, status in sorted(build_failed):
+                print(f"  {problem} [{status}]")
+
+        functional_failed = by_status.get("fail", [])
+        if functional_failed:
+            print(f"\nFunctional failures ({len(functional_failed)}) — compiled and ran, but mismatched the reference:")
+            for problem, r in sorted(functional_failed):
+                print(f"  {problem} ({r.get('mismatches')}/{r.get('samples')} mismatches)")
+
+        other = [(p, s) for s in OTHER_STATUSES for p, r in by_status.get(s, [])]
+        if other:
+            print(f"\nOther / inconclusive ({len(other)}):")
+            for problem, status in sorted(other):
+                print(f"  {problem} [{status}]")
+
+
 def main():
     args = parse_args()
 
@@ -179,7 +221,12 @@ def main():
     print(f"Dataset directory: {dataset_dir}")
     print(f"Configs: {[d.name for d in config_dirs]}\n")
 
-    summary = {}  # config_name -> {status: count}
+    # config_name -> {status: [(problem, result_dict), ...]} — every problem
+    # lands here regardless of whether it was freshly validated this run or
+    # already had a validation.json from a previous run, so the final
+    # summary always reflects the true current state of the whole run
+    # directory, not just what changed in this invocation.
+    summary = {}
 
     for config_dir in config_dirs:
         config_name = config_dir.name
@@ -197,28 +244,21 @@ def main():
             validation_file = problem_dir / "validation.json"
 
             if validation_file.exists() and not args.overwrite:
-                existing = json.loads(validation_file.read_text(encoding="utf-8"))
-                print(f"[skip] {config_name}/{problem} already validated ({existing.get('status')})")
-                summary[config_name]["skipped"] = summary[config_name].get("skipped", 0) + 1
-                continue
+                result = json.loads(validation_file.read_text(encoding="utf-8"))
+                print(f"[skip] {config_name}/{problem} already validated ({result.get('status')})")
+            else:
+                result, log = validate_problem(problem, problem_dir, dataset_dir, args.timeout)
+                (problem_dir / "validation.log").write_text(log, encoding="utf-8")
+                validation_file.write_text(json.dumps(result, indent=2), encoding="utf-8")
 
-            result, log = validate_problem(problem, problem_dir, dataset_dir, args.timeout)
+                extra = ""
+                if "mismatches" in result:
+                    extra = f" ({result['mismatches']}/{result['samples']} mismatches)"
+                print(f"[{result['status']}] {config_name}/{problem}{extra} ({result.get('duration_s', 0):.1f}s)")
 
-            (problem_dir / "validation.log").write_text(log, encoding="utf-8")
-            validation_file.write_text(json.dumps(result, indent=2), encoding="utf-8")
+            summary[config_name].setdefault(result["status"], []).append((problem, result))
 
-            extra = ""
-            if "mismatches" in result:
-                extra = f" ({result['mismatches']}/{result['samples']} mismatches)"
-            print(f"[{result['status']}] {config_name}/{problem}{extra} ({result.get('duration_s', 0):.1f}s)")
-            summary[config_name][result["status"]] = summary[config_name].get(result["status"], 0) + 1
-
-    print(f"\nRun directory: {run_dir}")
-    for config_name, counts in summary.items():
-        total = sum(v for k, v in counts.items() if k != "skipped")
-        passed = counts.get("pass", 0)
-        rate = f"{passed}/{total} ({100 * passed / total:.0f}%)" if total else "n/a"
-        print(f"  {config_name}: {counts}  pass rate: {rate}")
+    print_summary(run_dir, summary)
 
 
 if __name__ == "__main__":
