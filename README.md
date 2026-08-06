@@ -16,10 +16,12 @@ against a real compiler, not just eyeballed.
   Windows installer does not add itself to `PATH`; `src/tools.py` falls
   back to the default install location if `iverilog` isn't found on
   `PATH`).
-- **Slang** (optional) — a second build/lint tool exists (`lint_verilog` in
-  `src/tools.py`) but isn't wired into the agent yet, so this isn't required
-  to run the agent today. See [Installing Slang](#installing-slang) below
-  if you want to use it directly.
+- **Slang** (optional) — a second build/lint backend, selected via
+  `verilog_build_tool: slang` in your config (default is `icarus`, so this
+  isn't required unless you opt in). See
+  [Installing Slang](#installing-slang) below and
+  [Build tools](configs/README.md#build-tools) for what it catches that
+  Icarus doesn't.
 
 These are all system-level installs — a Python virtual environment (below)
 only isolates the Python packages (`langchain-core`, `langchain-ollama`),
@@ -86,9 +88,9 @@ Run `ollama list` to confirm what's pulled locally.
 ## Installing Slang
 
 [Slang](https://sv-lang.com) is a second SystemVerilog compiler/linter — the
-`lint_verilog` tool in `src/tools.py` wraps it, but that tool isn't
-connected to the agent yet (see [Design notes](#design-notes)), so this
-isn't required to run the agent today.
+`lint_verilog` tool in `src/tools.py` wraps it, used when a config sets
+`verilog_build_tool: slang` (see [Build tools](configs/README.md#build-tools)).
+The default is `icarus`, so this isn't required unless you opt in.
 
 Slang has no installer — grab a prebuilt binary from
 [GitHub releases](https://github.com/MikePopoloski/slang/releases)
@@ -230,22 +232,27 @@ multi-file compile against the actual dataset testbench reflects the truth.
 ## Architecture
 
 - **`src/config.py`** / **`configs/default.yaml`** — `AgentConfig`, a small
-  dataclass (`model`, `num_ctx`, `max_build_retries`) loaded from YAML via
-  `load_config()`. The single source of truth for experiment settings —
-  see [Run](#run) above.
+  dataclass (`model`, `num_ctx`, `max_build_retries`, `verilog_build_tool`)
+  loaded from YAML via `load_config()`. The single source of truth for
+  experiment settings — see [Run](#run) above.
 - **`src/model.py`** — the one swappable model/provider point (`build_llm()`
-  takes an `AgentConfig`, plus the system prompt).
-- **`src/tools.py`** — the five tools the agent can call: `write_file`,
-  `read_file`, `edit_file_block`, `list_directory`, `build_verilog`. All of
-  them are sandboxed to `src/generated/` — a model-supplied path is
-  untrusted input, normalized and checked so nothing can escape that
-  directory. Also defines `lint_verilog` (a Slang-backed sibling of
-  `build_verilog`), deliberately excluded from the agent's tool set for
-  now — see [Installing Slang](#installing-slang) and Design notes below.
-- **`src/rtl_agent.py`** — the interactive loop: a planning call with no
-  tools bound (so the model is structurally unable to act before planning),
-  then a ReAct tool-calling loop that auto-runs `build_verilog` after every
-  write/edit and forces a bounded number of fix attempts
+  takes an `AgentConfig`), plus `build_system_prompt(build_tool_name)` —
+  a function rather than a constant, since the build-and-fix instructions
+  it produces need to name whichever build tool is actually active.
+- **`src/tools.py`** — `BASE_TOOLS` (`write_file`, `read_file`,
+  `edit_file_block`, `list_directory` — always available) plus
+  `BUILD_TOOL_FUNCTIONS`/`BUILD_FAILURE_PREFIXES`, keyed by
+  `"icarus"`/`"slang"`: `build_verilog` and its structural sibling
+  `lint_verilog` (Slang-backed). `AgentConfig.verilog_build_tool` selects
+  exactly one to bind to the model — see
+  [Build tools](configs/README.md#build-tools). All file-touching tools are
+  sandboxed to `src/generated/` — a model-supplied path is untrusted input,
+  normalized and checked so nothing can escape that directory.
+- **`src/rtl_agent.py`** — the interactive loop: resolves the active build
+  tool from config once at startup, then a planning call with no tools
+  bound (so the model is structurally unable to act before planning),
+  then a ReAct tool-calling loop that auto-runs the active build tool
+  after every write/edit and forces a bounded number of fix attempts
   (`config.max_build_retries`) if a build fails.
 - **`test/run_benchmark.py`** — sweeps `rtl_agent.py` (one fresh subprocess
   per problem) over the verilog-eval dataset across one or more configs —
@@ -296,10 +303,16 @@ extending it:
   the whole time — `test/run_validation.py`'s real multi-file compile
   against the dataset's actual testbench is what caught this, not anything
   in the agent's own transcript.
-- **`lint_verilog` (Slang) is deliberately not wired into the agent yet.**
-  It's a structural sibling of `build_verilog` — same sandboxing, same
-  timeout, same success/failure shape — so a future config option to pick
-  the build backend (Icarus vs. Slang) is a straightforward swap rather
-  than a redesign. `-Weverything` alone already catches real issues Icarus
-  misses entirely: it flagged a genuine width-mismatch (`arith-op-mismatch`)
-  on a file Icarus compiled clean with no warning at all.
+- **Only one build tool is ever bound to the model at a time, never both.**
+  `lint_verilog` (Slang) was built as a structural sibling of
+  `build_verilog` (Icarus) specifically so `verilog_build_tool` could later
+  swap between them with no redesign — same sandboxing, same timeout, same
+  success/failure shape, just different wording ("Compilation failed" vs.
+  "Lint failed", tracked in `BUILD_FAILURE_PREFIXES`) that the auto-build
+  enforcement and retry logic in `rtl_agent.py` detect generically rather
+  than hardcoding one tool's name. Binding both would just leave the model
+  guessing which one to call. `-Weverything` alone already catches real
+  issues Icarus misses entirely: it flagged a genuine width-mismatch
+  (`arith-op-mismatch`) on a file Icarus compiled clean with no warning at
+  all — worth trying `verilog_build_tool: slang` on a config you care about
+  the strictness of.
