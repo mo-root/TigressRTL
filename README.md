@@ -192,6 +192,12 @@ Already-validated problems are skipped on a re-run unless `--overwrite` is
 passed. `--configs`/`--problems` filter which config-stems/problems to
 validate, same as `run_benchmark.py`.
 
+At the end, a categorized summary (pass rate, build failures, functional
+failures with mismatch counts, other/inconclusive) is both printed and
+written to `<run-dir>/validation_summary.json` — it reflects the true
+current state of the whole run directory (including already-validated,
+skipped problems), not just what changed in that particular invocation.
+
 **This is the trustworthy pass/fail signal — not `run_benchmark.py`'s own
 `transcript.log`.** `build_verilog` (the tool the agent itself calls) only
 compiles one file at a time, so if the agent writes an extra file alongside

@@ -165,37 +165,65 @@ BUILD_FAILURE_STATUSES = ("compile_error", "compile_timeout")
 OTHER_STATUSES = ("sim_timeout", "no_generated_code", "missing_dataset_files", "unknown")
 
 
-def print_summary(run_dir: Path, summary: dict) -> None:
+def build_summary_report(run_dir: Path, dataset_dir: Path, summary: dict) -> dict:
+    report = {
+        "run_dir": str(run_dir),
+        "dataset_dir": str(dataset_dir),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "configs": {},
+    }
+
+    for config_name, by_status in summary.items():
+        total = sum(len(v) for v in by_status.values())
+        passed = len(by_status.get("pass", []))
+
+        build_failed = sorted(p for s in BUILD_FAILURE_STATUSES for p, r in by_status.get(s, []))
+        functional_failed = [
+            {"problem": p, "mismatches": r.get("mismatches"), "samples": r.get("samples")}
+            for p, r in sorted(by_status.get("fail", []), key=lambda pr: pr[0])
+        ]
+        other = sorted(
+            (p, s) for s in OTHER_STATUSES for p, r in by_status.get(s, [])
+        )
+
+        report["configs"][config_name] = {
+            "total": total,
+            "passed": passed,
+            "pass_rate": round(passed / total, 4) if total else None,
+            "build_failures": build_failed,
+            "functional_failures": functional_failed,
+            "other": [{"problem": p, "status": s} for p, s in other],
+        }
+
+    return report
+
+
+def print_summary(run_dir: Path, report: dict) -> None:
     print(f"\n{'=' * 60}")
     print("Validation Summary")
     print(f"{'=' * 60}")
     print(f"Run directory: {run_dir}")
 
-    for config_name, by_status in summary.items():
-        total = sum(len(v) for v in by_status.values())
-        passed = len(by_status.get("pass", []))
-        rate = f"{100 * passed / total:.0f}%" if total else "n/a"
+    for config_name, c in report["configs"].items():
+        rate = f"{100 * c['pass_rate']:.0f}%" if c["pass_rate"] is not None else "n/a"
 
         print(f"\n--- {config_name} ---")
-        print(f"Pass: {passed}/{total} ({rate})")
+        print(f"Pass: {c['passed']}/{c['total']} ({rate})")
 
-        build_failed = [(p, s) for s in BUILD_FAILURE_STATUSES for p, r in by_status.get(s, [])]
-        if build_failed:
-            print(f"\nBuild failures ({len(build_failed)}) — never compiled:")
-            for problem, status in sorted(build_failed):
-                print(f"  {problem} [{status}]")
+        if c["build_failures"]:
+            print(f"\nBuild failures ({len(c['build_failures'])}) — never compiled:")
+            for problem in c["build_failures"]:
+                print(f"  {problem}")
 
-        functional_failed = by_status.get("fail", [])
-        if functional_failed:
-            print(f"\nFunctional failures ({len(functional_failed)}) — compiled and ran, but mismatched the reference:")
-            for problem, r in sorted(functional_failed):
-                print(f"  {problem} ({r.get('mismatches')}/{r.get('samples')} mismatches)")
+        if c["functional_failures"]:
+            print(f"\nFunctional failures ({len(c['functional_failures'])}) — compiled and ran, but mismatched the reference:")
+            for f in c["functional_failures"]:
+                print(f"  {f['problem']} ({f['mismatches']}/{f['samples']} mismatches)")
 
-        other = [(p, s) for s in OTHER_STATUSES for p, r in by_status.get(s, [])]
-        if other:
-            print(f"\nOther / inconclusive ({len(other)}):")
-            for problem, status in sorted(other):
-                print(f"  {problem} [{status}]")
+        if c["other"]:
+            print(f"\nOther / inconclusive ({len(c['other'])}):")
+            for o in c["other"]:
+                print(f"  {o['problem']} [{o['status']}]")
 
 
 def main():
@@ -258,7 +286,12 @@ def main():
 
             summary[config_name].setdefault(result["status"], []).append((problem, result))
 
-    print_summary(run_dir, summary)
+    report = build_summary_report(run_dir, dataset_dir, summary)
+    summary_file = run_dir / "validation_summary.json"
+    summary_file.write_text(json.dumps(report, indent=2), encoding="utf-8")
+
+    print_summary(run_dir, report)
+    print(f"\nSummary written to: {summary_file}")
 
 
 if __name__ == "__main__":
