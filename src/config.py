@@ -46,6 +46,24 @@ class AgentConfig:
     # would loop forever.
     max_build_retries: int = 3
 
+    # Which build/lint backend the agent's build tool uses — "icarus"
+    # (Icarus Verilog, src/tools.py's build_verilog) or "slang"
+    # (sv-lang.com, build_verilog's structural sibling lint_verilog).
+    # Exactly one is bound to the model at a time (see rtl_agent.py);
+    # they're never both exposed together.
+    verilog_build_tool: str = "icarus"
+
+    def __post_init__(self):
+        # Not imported from tools.py's BUILD_TOOL_FUNCTIONS keys on purpose —
+        # that would pull langchain_core/subprocess into config.py just for
+        # a two-string validation check. A typo'd value (e.g. "islang")
+        # should fail loudly here, same discipline as load_config()'s
+        # unknown-key check below.
+        if self.verilog_build_tool not in ("icarus", "slang"):
+            raise ValueError(
+                f"verilog_build_tool must be 'icarus' or 'slang', got {self.verilog_build_tool!r}"
+            )
+
 
 def load_config(path: str | Path | None) -> AgentConfig:
     # `path=None` means "use the built-in defaults" — kept as a parameter

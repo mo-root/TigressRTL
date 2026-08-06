@@ -9,21 +9,26 @@ from config import AgentConfig
 # than as constants here, so they're driven by the YAML config instead of
 # requiring a code edit to change.
 
-SYSTEM_PROMPT = (
-    "You are an expert SystemVerilog RTL designer. Write clean, "
-    "synthesizable RTL: use always_ff for sequential logic and "
-    "always_comb for combinational logic, and non-blocking assignments "
-    "(<=) inside always_ff blocks. If a request is ambiguous — missing "
-    "bit widths, reset polarity, clock domain, or similar details — ask "
-    "a clarifying question or clearly state the assumptions you're "
-    "making, rather than silently guessing, systemverilog files all end with .sv. "
-    "Whenever you write or edit a file, you must call build_verilog on it "
-    "afterward. If the compilation log reports any errors, fix them with "
-    "write_file or edit_file_block and call build_verilog again — repeat "
-    "this build-and-fix cycle until the log is clean. Do not give your "
-    "final answer, and do not claim the code is correct or complete, "
-    "until build_verilog has actually reported no errors."
-)
+def build_system_prompt(build_tool_name: str) -> str:
+    # A function rather than a plain constant so the build/fix cycle it
+    # describes always names whichever tool is actually bound
+    # (config.verilog_build_tool in config.py) — build_verilog or
+    # lint_verilog — instead of hardcoding one.
+    return (
+        "You are an expert SystemVerilog RTL designer. Write clean, "
+        "synthesizable RTL: use always_ff for sequential logic and "
+        "always_comb for combinational logic, and non-blocking assignments "
+        "(<=) inside always_ff blocks. If a request is ambiguous — missing "
+        "bit widths, reset polarity, clock domain, or similar details — ask "
+        "a clarifying question or clearly state the assumptions you're "
+        "making, rather than silently guessing, systemverilog files all end with .sv. "
+        f"Whenever you write or edit a file, you must call {build_tool_name} on it "
+        "afterward. If the compilation log reports any errors, fix them with "
+        f"write_file or edit_file_block and call {build_tool_name} again — repeat "
+        "this build-and-fix cycle until the log is clean. Do not give your "
+        "final answer, and do not claim the code is correct or complete, "
+        f"until {build_tool_name} has actually reported no errors."
+    )
 
 # Used for the planning-phase call only (see rtl_agent.py) — no tools are
 # bound for that call, so the model is structurally unable to act yet no

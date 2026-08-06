@@ -5,8 +5,8 @@ import sys
 from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage
 
 from config import DEFAULT_CONFIG_PATH, load_config
-from model import build_llm, SYSTEM_PROMPT, PLANNING_INSTRUCTION
-from tools import TOOLS, TOOL_FUNCTIONS
+from model import build_llm, build_system_prompt, PLANNING_INSTRUCTION
+from tools import BASE_TOOLS, BUILD_FAILURE_PREFIXES, BUILD_TOOL_FUNCTIONS
 
 # Windows terminals default to a codepage that can't render some characters —
 # force UTF-8 output so nothing gets garbled.
@@ -30,6 +30,16 @@ if args.model:
     # takes precedence over whatever the config file says.
     config = dataclasses.replace(config, model=args.model)
 
+# config.verilog_build_tool selects exactly one build/lint backend to bind
+# to the model — never both, since the point is picking one, not offering
+# a confusing choice to the LLM. TOOLS/TOOL_FUNCTIONS are built here rather
+# than imported as a fixed list, since the active tool is config-driven.
+active_build_tool = BUILD_TOOL_FUNCTIONS[config.verilog_build_tool]
+active_build_tool_name = active_build_tool.name
+build_failure_prefix = BUILD_FAILURE_PREFIXES[config.verilog_build_tool]
+TOOLS = BASE_TOOLS + [active_build_tool]
+TOOL_FUNCTIONS = {t.name: t for t in TOOLS}
+
 # `llm` is our handle to the model. `.bind_tools(TOOLS)` returns a new
 # runnable that knows about each tool's schema and may respond with
 # tool_calls instead of (or alongside) plain text — the model itself never
@@ -44,7 +54,7 @@ llm_with_tools = llm.bind_tools(TOOLS)
 #   HumanMessage(...)  - you
 #   AIMessage(...)     - the model's turn (may carry .tool_calls)
 #   ToolMessage(...)   - a tool's result, tagged with which call it answers
-messages = [SystemMessage(content=SYSTEM_PROMPT)]
+messages = [SystemMessage(content=build_system_prompt(active_build_tool_name))]
 
 print("Chatting with", config.model, "— a SystemVerilog RTL design assistant.")
 print("Type 'exit' or 'quit' to stop.\n")
@@ -99,8 +109,8 @@ while True:
                 print(
                     f"\nError: model '{config.model}' does not "
                     "support tool calling in Ollama.\nThis agent's tools (write_file, "
-                    "read_file, edit_file_block, list_directory, build_verilog) require "
-                    "a tool-capable model.\nTry --model llama3.2 instead — see "
+                    f"read_file, edit_file_block, list_directory, {active_build_tool_name}) "
+                    "require a tool-capable model.\nTry --model llama3.2 instead — see "
                     "README.md for what's been tested."
                 )
                 sys.exit(1)
@@ -123,10 +133,10 @@ while True:
                 print(f"[Retry] Build is still failing and no fix was applied — "
                       f"forcing attempt {build_retry_count}/{config.max_build_retries}.")
                 messages.append(HumanMessage(content=(
-                    "The last build_verilog result was a failure, and you did not "
-                    "call write_file or edit_file_block to actually apply a fix — "
-                    "you only described one. Call the appropriate tool now with "
-                    "the corrected content."
+                    f"The last {active_build_tool_name} result was a failure, and you "
+                    "did not call write_file or edit_file_block to actually apply a "
+                    "fix — you only described one. Call the appropriate tool now "
+                    "with the corrected content."
                 )))
                 continue
             break  # model gave its final answer for this turn — inner loop ends
@@ -141,27 +151,27 @@ while True:
             tool_fn = TOOL_FUNCTIONS[name]
             result = tool_fn.invoke(call["args"])
 
-            # Enforcement, not a request: SYSTEM_PROMPT asks the model to
+            # Enforcement, not a request: the system prompt asks the model to
             # always build after writing, but that isn't reliable — models
-            # have skipped the write entirely, called build_verilog on a
+            # have skipped the write entirely, called the build tool on a
             # file that doesn't exist yet, and narrated fake write_file(...)/
-            # build_verilog(...) calls as plain text instead of actually
+            # build-tool(...) calls as plain text instead of actually
             # invoking them. So instead of trusting the model to remember,
             # the harness runs the build itself right after any successful
             # write/edit, and folds the result into the SAME tool response —
             # the model sees it whether or not it asked.
             if name in ("write_file", "edit_file_block") and result.startswith(("Wrote", "Replaced")):
                 file_path = call["args"].get("file_path")
-                build_result = TOOL_FUNCTIONS["build_verilog"].invoke({"file_path": file_path})
+                build_result = active_build_tool.invoke({"file_path": file_path})
                 print("[Auto-Build]", build_result)
                 # Drives the retry check above: a real, current failure sets
                 # this True; a successful build clears it (and resets the
                 # retry count) so a later, unrelated failure gets its own
                 # fresh set of attempts rather than inheriting an old count.
-                build_failed = build_result.startswith("Compilation failed")
+                build_failed = build_result.startswith(build_failure_prefix)
                 if not build_failed:
                     build_retry_count = 0
-                result = f"{result}\n\n[automatically ran build_verilog after {name}]\n{build_result}"
+                result = f"{result}\n\n[automatically ran {active_build_tool_name} after {name}]\n{build_result}"
 
             # Print the tool's actual return value directly — never rely on
             # the model's own later paraphrase of it. Models have been

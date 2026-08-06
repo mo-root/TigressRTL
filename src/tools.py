@@ -216,18 +216,29 @@ def list_directory(path: str = ".") -> str:
         return f"Failed to list {path}: {e}"
 
 
-# name -> tool dispatch. `@tool` turns each function into a StructuredTool
-# object, not a plain function — it is NOT directly callable as
-# write_file(**args) (that raises "object is not callable"). The correct
-# call is TOOL_FUNCTIONS[name].invoke(args), passing the whole args dict
-# rather than unpacking it as keyword arguments. This dict is the seam for
-# adding more tools later — rtl_agent.py's loop never needs to change, only
-# this file does.
-TOOLS = [write_file, read_file, edit_file_block, list_directory, build_verilog]
-TOOL_FUNCTIONS = {
-    "write_file": write_file,
-    "read_file": read_file,
-    "edit_file_block": edit_file_block,
-    "list_directory": list_directory,
-    "build_verilog": build_verilog,
+# Tools always available regardless of which build backend is selected.
+# `@tool` turns each function into a StructuredTool object, not a plain
+# function — it is NOT directly callable as write_file(**args) (that raises
+# "object is not callable"). The correct call is
+# TOOL_FUNCTIONS[name].invoke(args), passing the whole args dict rather
+# than unpacking it as keyword arguments (see rtl_agent.py).
+BASE_TOOLS = [write_file, read_file, edit_file_block, list_directory]
+
+# The two interchangeable build/lint backends — AgentConfig.verilog_build_tool
+# (see config.py) selects exactly one of these to bind to the model;
+# rtl_agent.py builds its own TOOLS/TOOL_FUNCTIONS from BASE_TOOLS plus
+# whichever one is active, rather than importing a fixed list here.
+BUILD_TOOL_FUNCTIONS = {
+    "icarus": build_verilog,
+    "slang": lint_verilog,
+}
+
+# Return-value prefixes that mean "the build/lint failed", one per backend —
+# build_verilog and lint_verilog intentionally keep their own distinct
+# wording ("Compilation failed" vs "Lint failed", more informative than a
+# generic message), so rtl_agent.py's auto-build enforcement needs this
+# lookup to detect failure generically instead of hardcoding either string.
+BUILD_FAILURE_PREFIXES = {
+    "icarus": "Compilation failed",
+    "slang": "Lint failed",
 }
