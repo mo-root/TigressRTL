@@ -16,6 +16,10 @@ against a real compiler, not just eyeballed.
   Windows installer does not add itself to `PATH`; `src/tools.py` falls
   back to the default install location if `iverilog` isn't found on
   `PATH`).
+- **Slang** (optional) — a second build/lint tool exists (`lint_verilog` in
+  `src/tools.py`) but isn't wired into the agent yet, so this isn't required
+  to run the agent today. See [Installing Slang](#installing-slang) below
+  if you want to use it directly.
 
 These are all system-level installs — a Python virtual environment (below)
 only isolates the Python packages (`langchain-core`, `langchain-ollama`),
@@ -78,6 +82,22 @@ ollama pull devstral-2   # 123B flagship, 75GB — not verified locally, see con
 ```
 
 Run `ollama list` to confirm what's pulled locally.
+
+## Installing Slang
+
+[Slang](https://sv-lang.com) is a second SystemVerilog compiler/linter — the
+`lint_verilog` tool in `src/tools.py` wraps it, but that tool isn't
+connected to the agent yet (see [Design notes](#design-notes)), so this
+isn't required to run the agent today.
+
+Slang has no installer — grab a prebuilt binary from
+[GitHub releases](https://github.com/MikePopoloski/slang/releases)
+(`slang-windows-x86_64.zip` or `slang-linux-x86_64.tar.gz`), extract it, and
+put `slang`/`slang.exe` on `PATH`. `src/tools.py` falls back to
+`C:\slang\slang.exe` on Windows if `slang` isn't found on `PATH`. No
+official `winget`/`apt` package exists; `conda-forge` has `slang-verilog`
+as an alternative. Building from source is documented at
+[sv-lang.com/building.html](https://sv-lang.com/building.html).
 
 ## Run
 
@@ -219,7 +239,9 @@ multi-file compile against the actual dataset testbench reflects the truth.
   `read_file`, `edit_file_block`, `list_directory`, `build_verilog`. All of
   them are sandboxed to `src/generated/` — a model-supplied path is
   untrusted input, normalized and checked so nothing can escape that
-  directory.
+  directory. Also defines `lint_verilog` (a Slang-backed sibling of
+  `build_verilog`), deliberately excluded from the agent's tool set for
+  now — see [Installing Slang](#installing-slang) and Design notes below.
 - **`src/rtl_agent.py`** — the interactive loop: a planning call with no
   tools bound (so the model is structurally unable to act before planning),
   then a ReAct tool-calling loop that auto-runs `build_verilog` after every
@@ -274,3 +296,10 @@ extending it:
   the whole time — `test/run_validation.py`'s real multi-file compile
   against the dataset's actual testbench is what caught this, not anything
   in the agent's own transcript.
+- **`lint_verilog` (Slang) is deliberately not wired into the agent yet.**
+  It's a structural sibling of `build_verilog` — same sandboxing, same
+  timeout, same success/failure shape — so a future config option to pick
+  the build backend (Icarus vs. Slang) is a straightforward swap rather
+  than a redesign. `-Weverything` alone already catches real issues Icarus
+  misses entirely: it flagged a genuine width-mismatch (`arith-op-mismatch`)
+  on a file Icarus compiled clean with no warning at all.
