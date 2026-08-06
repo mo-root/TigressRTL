@@ -19,6 +19,14 @@ IVERILOG_PATH = shutil.which("iverilog") or (
     _IVERILOG_FALLBACK if os.path.exists(_IVERILOG_FALLBACK) else "iverilog"
 )
 
+# Slang (https://sv-lang.com) ships as a prebuilt binary with no installer —
+# same PATH-then-fallback lookup as Icarus above, since there's no
+# guarantee it ended up on PATH after extracting a release zip/tar.gz.
+_SLANG_FALLBACK = r"C:\slang\slang.exe"
+SLANG_PATH = shutil.which("slang") or (
+    _SLANG_FALLBACK if os.path.exists(_SLANG_FALLBACK) else "slang"
+)
+
 
 def _resolve_safe_path(path: str) -> Path:
     # Shared by every tool below. Resolves a model-supplied path against
@@ -146,6 +154,49 @@ def build_verilog(file_path: str) -> str:
         return f"Compilation of {file_path} timed out after 30s."
     except (OSError, ValueError) as e:
         return f"Failed to compile {file_path}: {e}"
+
+
+@tool
+def lint_verilog(file_path: str) -> str:
+    """Compile a SystemVerilog file with Slang and return the real build/lint log (errors/warnings). Not yet wired into the agent's tool set — see build_verilog for the connected equivalent."""
+    try:
+        target = _resolve_safe_path(file_path)
+        if not target.exists():
+            return f"File not found: {file_path}"
+
+        # -Weverything turns on every warning class, not just the default
+        # subset — this is what makes it a genuine lint pass rather than
+        # just a compile check. No SV-version flag is needed (unlike
+        # Icarus's -g2012): slang parses modern SystemVerilog by default.
+        result = subprocess.run(
+            [SLANG_PATH, "-Weverything", str(target)],
+            capture_output=True, text=True, timeout=30,
+        )
+        log = (result.stdout + result.stderr).strip()
+
+        # Unlike Icarus, slang always prints a "Build succeeded: N errors,
+        # M warnings" summary line even on success, so `log` is virtually
+        # never empty here — that's fine, it's more informative than
+        # build_verilog's silent-on-success behavior (it surfaces warning
+        # counts even when the build passes).
+        if result.returncode == 0:
+            return log or "Linted successfully — no errors or warnings."
+        return f"Lint failed (exit code {result.returncode}):\n{log}"
+
+    except FileNotFoundError:
+        # Raised if SLANG_PATH itself can't be executed at all (not just a
+        # lint error in the .sv file) — slang has no installer; grab a
+        # prebuilt release binary and put it on PATH.
+        return (
+            "slang is not installed or could not be found. Download a prebuilt "
+            "release from https://github.com/MikePopoloski/slang/releases and "
+            "put slang(.exe) on PATH, or build from source per "
+            "https://sv-lang.com/building.html."
+        )
+    except subprocess.TimeoutExpired:
+        return f"Lint of {file_path} timed out after 30s."
+    except (OSError, ValueError) as e:
+        return f"Failed to lint {file_path}: {e}"
 
 
 @tool
