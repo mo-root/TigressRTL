@@ -24,6 +24,23 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
+
+def accumulate_tokens(totals: dict, response) -> None:
+    # ChatOllama populates AIMessage.usage_metadata on every non-streaming
+    # .invoke() call (confirmed directly against a live response) — the
+    # `or {}`/.get(..., 0) guards are defensive only, not expected to
+    # actually trigger with this provider.
+    usage = getattr(response, "usage_metadata", None) or {}
+    totals["input_tokens"] += usage.get("input_tokens", 0)
+    totals["output_tokens"] += usage.get("output_tokens", 0)
+
+
+# One agent process handles exactly one problem in the benchmark harness
+# (test/run_benchmark.py runs a fresh subprocess per problem), so a
+# process-lifetime total is already a per-problem total — no extra
+# scoping needed.
+token_totals = {"input_tokens": 0, "output_tokens": 0}
+
 config = load_config(args.config)
 if args.model:
     # A one-off override shouldn't require writing a new YAML file — this
@@ -62,6 +79,11 @@ print("Type 'exit' or 'quit' to stop.\n")
 while True:
     user_input = input("You: ").strip()
     if user_input.lower() in {"exit", "quit"}:
+        print(
+            f"[Token Usage] input_tokens={token_totals['input_tokens']} "
+            f"output_tokens={token_totals['output_tokens']} "
+            f"total_tokens={token_totals['input_tokens'] + token_totals['output_tokens']}"
+        )
         break
     if not user_input:
         continue
@@ -74,6 +96,7 @@ while True:
     # before acting" prompt instruction gets followed — local models have
     # repeatedly been observed skipping or misordering such instructions.
     plan_response = llm.invoke(messages + [HumanMessage(content=PLANNING_INSTRUCTION)])
+    accumulate_tokens(token_totals, plan_response)
     print("[Plan]", plan_response.content, "\n")
     messages.append(plan_response)
 
@@ -115,6 +138,7 @@ while True:
                 )
                 sys.exit(1)
             raise
+        accumulate_tokens(token_totals, response)
         messages.append(response)
 
         # `response.tool_calls` is a list of dicts:
