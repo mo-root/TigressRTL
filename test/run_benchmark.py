@@ -1,6 +1,7 @@
 import argparse
 import fnmatch
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -13,6 +14,14 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 RTL_AGENT = REPO_ROOT / "src" / "rtl_agent.py"
+
+# Matches rtl_agent.py's own [Token Usage] summary line, printed once on
+# exit -- parsed out of the subprocess's captured stdout the same way
+# run_validation.py already pulls "Mismatches: N in M samples" out of raw
+# simulation output, no separate IPC mechanism needed.
+TOKEN_USAGE_RE = re.compile(
+    r"\[Token Usage\] input_tokens=(\d+) output_tokens=(\d+) total_tokens=(\d+)"
+)
 
 # test/run_benchmark.py lives outside src/, so tools.py/config.py aren't on
 # sys.path the way they are for scripts run directly from inside src/ —
@@ -105,6 +114,21 @@ def copy_generated_outputs(generated_dir: str, dest: Path) -> int:
             if entry.suffix in (".sv", ".svh"):
                 count += 1
     return count
+
+
+def parse_token_usage(log: str) -> dict:
+    match = TOKEN_USAGE_RE.search(log)
+    if not match:
+        # Subprocess crashed/timed out before reaching the exit path, or
+        # predates this feature -- None, not 0, so it's distinguishable
+        # from a run that genuinely used zero tokens.
+        return {"input_tokens": None, "output_tokens": None, "total_tokens": None}
+    input_tokens, output_tokens, total_tokens = (int(g) for g in match.groups())
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": total_tokens,
+    }
 
 
 def run_one(python: str, config_path: Path, prompt_single_line: str, timeout: float | None):
@@ -203,10 +227,16 @@ def main():
     print(f"Problems: {len(problems)} of {len(all_problems)} discovered\n")
 
     summary = {}  # config_stem -> {status: count}
+    # config_stem -> {input_tokens, output_tokens, total_tokens} -- "total
+    # for this run" means the whole run directory's current state, so
+    # skipped (already-completed) problems contribute their own
+    # already-recorded tokens too, not just freshly-run ones.
+    token_summary = {}
 
     for config_path in config_paths:
         config_stem = config_path.stem
         summary[config_stem] = {}
+        token_summary[config_stem] = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
         cfg = load_config(config_path)
 
         for problem in problems:
@@ -218,6 +248,12 @@ def main():
                 if existing.get("status") == "completed":
                     print(f"[skip] {config_stem}/{problem} already completed")
                     summary[config_stem]["skipped"] = summary[config_stem].get("skipped", 0) + 1
+                    # Older runs predate token tracking and have no
+                    # input_tokens/etc. keys at all -- .get(..., 0) with a
+                    # `None` fallback handled by `or 0` covers both that
+                    # and a value explicitly recorded as None.
+                    for key in ("input_tokens", "output_tokens", "total_tokens"):
+                        token_summary[config_stem][key] += existing.get(key) or 0
                     continue
 
             problem_dir.mkdir(parents=True, exist_ok=True)
@@ -232,6 +268,7 @@ def main():
 
             (problem_dir / "transcript.log").write_text(log, encoding="utf-8")
             sv_count = copy_generated_outputs(GENERATED_DIR, problem_dir / "generated")
+            token_usage = parse_token_usage(log)
 
             status_file.write_text(json.dumps({
                 "problem": problem,
@@ -243,14 +280,21 @@ def main():
                 "sv_file_count": sv_count,
                 "duration_s": round(duration, 1),
                 "timestamp": datetime.now(timezone.utc).isoformat(),
+                **token_usage,
             }, indent=2), encoding="utf-8")
 
-            print(f"[{status}] {config_stem}/{problem} ({sv_count} file(s), {duration:.1f}s)")
+            for key in ("input_tokens", "output_tokens", "total_tokens"):
+                token_summary[config_stem][key] += token_usage[key] or 0
+
+            print(f"[{status}] {config_stem}/{problem} ({sv_count} file(s), {duration:.1f}s, "
+                  f"{token_usage['total_tokens'] or 0} tokens)")
             summary[config_stem][status] = summary[config_stem].get(status, 0) + 1
 
     print(f"\nRun directory: {run_dir}")
     for config_stem, counts in summary.items():
-        print(f"  {config_stem}: {counts}")
+        tokens = token_summary[config_stem]
+        print(f"  {config_stem}: {counts}  tokens: input={tokens['input_tokens']} "
+              f"output={tokens['output_tokens']} total={tokens['total_tokens']}")
 
 
 if __name__ == "__main__":
