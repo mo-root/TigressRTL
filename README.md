@@ -180,7 +180,8 @@ benchmark_runs/2026-08-04_23-45-28/
     Prob001_zero/
       prompt.txt            # the single-lined prompt piped into rtl_agent.py
       transcript.log        # full agent output ([Plan]/[Action]/[Result]/[Auto-Build]/Assistant)
-      status.json           # {problem, model, num_ctx, status, sv_file_count, duration_s, ...}
+      status.json           # {problem, model, num_ctx, status, sv_file_count, duration_s,
+                             #  input_tokens, output_tokens, total_tokens, ...}
       generated/             # whatever ended up in src/generated/ after this run
 ```
 
@@ -191,6 +192,15 @@ errored. Without `--resume-dir`, every invocation always starts a fresh
 timestamped directory. See `--help` for `--problems` (filter by name/glob),
 `--timeout` (per-problem subprocess timeout, none by default), and `--python`
 (interpreter to launch `rtl_agent.py` with).
+
+`rtl_agent.py` prints a `[Token Usage]` line on exit (accumulated across every
+LLM call in that process, i.e. that one problem), which `run_benchmark.py`
+parses into each problem's `status.json` and sums into the end-of-run
+summary — `  default: {'completed': 103}  tokens: input=... output=... total=...`.
+Skipped (already-completed) problems contribute their previously-recorded
+tokens too, so the total reflects the whole run directory, not just what
+this particular invocation freshly ran. Problems from before this feature
+existed show `0` rather than crashing.
 
 ### Validating generated code
 
