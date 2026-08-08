@@ -15,4 +15,5 @@ max_build_retries: 3
 # Verilog, a real compiler) or "slang" (sv-lang.com, a stricter linter —
 # see configs/README.md for what -Weverything catches that Icarus misses).
 # Exactly one is bound to the model at a time, never both.
-verilog_build_tool: icarus
+#verilog_build_tool: icarus
+verilog_build_tool: slang
