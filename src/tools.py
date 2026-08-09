@@ -28,6 +28,19 @@ SLANG_PATH = shutil.which("slang") or (
 )
 
 
+def _project_sv_files() -> list[str]:
+    # Every design file currently in the sandbox, not just the one the model
+    # named — build_verilog/lint_verilog compile the whole project together
+    # so a self-authored testbench in a second file that instantiates
+    # TopModule resolves correctly instead of failing with a spurious
+    # "unknown module" error (each run_benchmark.py problem gets its own
+    # cleared GENERATED_DIR, so this never pulls in another problem's
+    # files). .svh headers are excluded — they're meant to be `included,
+    # not compiled as standalone top-level units.
+    base = Path(GENERATED_DIR).resolve()
+    return sorted(str(p) for p in base.rglob("*.sv"))
+
+
 def _resolve_safe_path(path: str) -> Path:
     # Shared by every tool below. Resolves a model-supplied path against
     # GENERATED_DIR and rejects anything that would escape it (e.g. "../..",
@@ -121,7 +134,7 @@ def edit_file_block(file_path: str, target_string: str, replacement_string: str)
 
 @tool
 def build_verilog(file_path: str) -> str:
-    """Compile a SystemVerilog file with Icarus Verilog and return the real compilation log (errors/warnings), without running a simulation."""
+    """Compile a SystemVerilog file — together with every other .sv file in the project — with Icarus Verilog and return the real compilation log (errors/warnings), without running a simulation."""
     try:
         target = _resolve_safe_path(file_path)
         if not target.exists():
@@ -130,9 +143,13 @@ def build_verilog(file_path: str) -> str:
         # -g2012 enables SystemVerilog-2012 syntax support (iverilog defaults
         # to plain Verilog otherwise). -t null elaborates the design and
         # reports errors/warnings without generating a runnable simulation
-        # output — a compile/syntax check, not a simulation run.
+        # output — a compile/syntax check, not a simulation run. All project
+        # .sv files are passed together (not just `target`) so a second file
+        # that references the first — most commonly a self-authored
+        # testbench instantiating TopModule — elaborates correctly instead
+        # of a spurious "unknown module" error.
         result = subprocess.run(
-            [IVERILOG_PATH, "-g2012", "-t", "null", str(target)],
+            [IVERILOG_PATH, "-g2012", "-t", "null", *_project_sv_files()],
             capture_output=True, text=True, timeout=30,
         )
         log = (result.stdout + result.stderr).strip()
@@ -158,7 +175,7 @@ def build_verilog(file_path: str) -> str:
 
 @tool
 def lint_verilog(file_path: str) -> str:
-    """Compile a SystemVerilog file with Slang and return the real build/lint log (errors/warnings). Not yet wired into the agent's tool set — see build_verilog for the connected equivalent."""
+    """Compile a SystemVerilog file — together with every other .sv file in the project — with Slang and return the real build/lint log (errors/warnings)."""
     try:
         target = _resolve_safe_path(file_path)
         if not target.exists():
@@ -168,8 +185,12 @@ def lint_verilog(file_path: str) -> str:
         # subset — this is what makes it a genuine lint pass rather than
         # just a compile check. No SV-version flag is needed (unlike
         # Icarus's -g2012): slang parses modern SystemVerilog by default.
+        # All project .sv files are passed together (not just `target`) so
+        # a second file that references the first — most commonly a
+        # self-authored testbench instantiating TopModule — resolves
+        # correctly instead of a spurious "unknown module" error.
         result = subprocess.run(
-            [SLANG_PATH, "-Weverything", str(target)],
+            [SLANG_PATH, "-Weverything", *_project_sv_files()],
             capture_output=True, text=True, timeout=30,
         )
         log = (result.stdout + result.stderr).strip()
