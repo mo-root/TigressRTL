@@ -5,7 +5,7 @@ import sys
 from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage
 
 from config import DEFAULT_CONFIG_PATH, load_config
-from model import build_llm, build_system_prompt, PLANNING_INSTRUCTION
+from model import build_llm, build_system_prompt, FIX_PLAN_INSTRUCTION, PLANNING_INSTRUCTION
 from tools import BASE_TOOLS, BUILD_FAILURE_PREFIXES, BUILD_TOOL_FUNCTIONS
 
 # Windows terminals default to a codepage that can't render some characters —
@@ -116,10 +116,29 @@ while True:
     build_failed = False
     build_retry_count = 0
 
+    # Set whenever an auto-build freshly fails (below), so the very next
+    # model turn gets a short, tools-unbound "diagnose and plan the fix"
+    # call first — same structural-guarantee pattern as the initial
+    # PLANNING_INSTRUCTION (a plain llm.invoke() with no tools bound, not a
+    # prompt hope), since local models have been observed diving straight
+    # into another guessed edit without pausing to actually read the error.
+    # Cleared once that plan call has been made, so a retry nudge (model
+    # skipped acting, not a fresh failure) doesn't trigger a second plan
+    # for the same error.
+    fix_plan_pending = False
+
     # Inner loop: the ReAct cycle for this one turn — keep calling the
     # model and executing whatever tools it requests until a response has
     # no more tool_calls, which is the model's final answer for this turn.
     while True:
+        if fix_plan_pending:
+            fix_plan_response = llm.invoke(messages + [HumanMessage(content=FIX_PLAN_INSTRUCTION)])
+            accumulate_tokens(token_totals, fix_plan_response)
+            print("[Fix Plan]", fix_plan_response.content, "\n")
+            messages.append(fix_plan_response)
+            messages.append(HumanMessage(content="Now apply that fix using the available tools."))
+            fix_plan_pending = False
+
         try:
             response = llm_with_tools.invoke(messages)
         except Exception as e:
@@ -195,6 +214,8 @@ while True:
                 build_failed = build_result.startswith(build_failure_prefix)
                 if not build_failed:
                     build_retry_count = 0
+                else:
+                    fix_plan_pending = True
                 result = f"{result}\n\n[automatically ran {active_build_tool_name} after {name}]\n{build_result}"
 
             # Print the tool's actual return value directly — never rely on

@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -26,6 +27,41 @@ _SLANG_FALLBACK = r"C:\slang\slang.exe"
 SLANG_PATH = shutil.which("slang") or (
     _SLANG_FALLBACK if os.path.exists(_SLANG_FALLBACK) else "slang"
 )
+
+
+# Matches the start of one diagnostic from either tool: slang's
+# "file:line:col: error: msg" / "...warning: msg", or icarus's
+# "file:line: error: msg" / bare "file:line: syntax error" (icarus's
+# generic syntax-error line, always followed by a more specific "error:"
+# line at the same location — so one real icarus error is two matches
+# here, not one; MAX_DIAG_BLOCKS is set to 6 rather than 3 to compensate,
+# giving ~3 full icarus errors or 6 full slang diagnostics). Deliberately
+# does not match "note:" — a note is auxiliary info tied to the block
+# before it (e.g. "previous definition here"), so it stays folded into
+# that block instead of eating one of the kept slots.
+_DIAG_START_RE = re.compile(r"^\S+:\d+(?::\d+)?:\s*(?:(error|warning)\b|syntax error\b)", re.MULTILINE)
+_DIAG_IS_ERROR_RE = re.compile(r"^\S+:\d+(?::\d+)?:\s*(error\b|syntax error\b)")
+MAX_DIAG_BLOCKS = 6
+
+
+def _truncate_diagnostics(stderr_log: str, max_blocks: int = MAX_DIAG_BLOCKS) -> str:
+    # Both tools write every actual diagnostic to stderr (slang's stdout is
+    # just a short fixed-size summary; icarus's stdout is empty), so
+    # truncating stderr alone — before it's concatenated with stdout — caps
+    # runaway logs (e.g. -Weverything's dozens of warnings) without
+    # touching the cheap summary text. Diagnostics are multi-line for slang
+    # (message + source snippet + caret) and single-line for icarus, so
+    # this splits on _DIAG_START_RE rather than raw line count to avoid
+    # slicing a block in half.
+    starts = [m.start() for m in _DIAG_START_RE.finditer(stderr_log)]
+    if len(starts) <= max_blocks:
+        return stderr_log
+    bounds = starts + [len(stderr_log)]
+    blocks = [stderr_log[bounds[i]:bounds[i + 1]] for i in range(len(starts))]
+    kept, omitted = blocks[:max_blocks], blocks[max_blocks:]
+    n_err = sum(1 for b in omitted if _DIAG_IS_ERROR_RE.match(b))
+    n_warn = len(omitted) - n_err
+    return "".join(kept) + f"... ({n_err} more error(s), {n_warn} more warning(s) omitted) ...\n"
 
 
 def _project_sv_files() -> list[str]:
@@ -152,7 +188,7 @@ def build_verilog(file_path: str) -> str:
             [IVERILOG_PATH, "-g2012", "-t", "null", *_project_sv_files()],
             capture_output=True, text=True, timeout=30,
         )
-        log = (result.stdout + result.stderr).strip()
+        log = (result.stdout + _truncate_diagnostics(result.stderr)).strip()
 
         if result.returncode == 0:
             return log or "Compiled successfully — no errors or warnings."
@@ -185,15 +221,18 @@ def lint_verilog(file_path: str) -> str:
         # subset — this is what makes it a genuine lint pass rather than
         # just a compile check. No SV-version flag is needed (unlike
         # Icarus's -g2012): slang parses modern SystemVerilog by default.
-        # All project .sv files are passed together (not just `target`) so
-        # a second file that references the first — most commonly a
-        # self-authored testbench instantiating TopModule — resolves
-        # correctly instead of a spurious "unknown module" error.
+        # -Wno-newline-eof suppresses a cosmetic-only warning (missing
+        # trailing newline) that write_file's model-supplied content
+        # triggers constantly and that carries no signal about RTL
+        # correctness. All project .sv files are passed together (not just
+        # `target`) so a second file that references the first — most
+        # commonly a self-authored testbench instantiating TopModule —
+        # resolves correctly instead of a spurious "unknown module" error.
         result = subprocess.run(
-            [SLANG_PATH, "-Weverything", *_project_sv_files()],
+            [SLANG_PATH, "-Weverything", "-Wno-newline-eof", *_project_sv_files()],
             capture_output=True, text=True, timeout=30,
         )
-        log = (result.stdout + result.stderr).strip()
+        log = (result.stdout + _truncate_diagnostics(result.stderr)).strip()
 
         # Unlike Icarus, slang always prints a "Build succeeded: N errors,
         # M warnings" summary line even on success, so `log` is virtually

@@ -52,6 +52,19 @@ PLANNING_INSTRUCTION = (
     "SystemVerilog code yet — just the plan."
 )
 
+# Used for the fix-plan call only (see rtl_agent.py), triggered every time
+# an auto-build freshly fails — same structural guarantee as
+# PLANNING_INSTRUCTION (no tools bound for this call), so the model can't
+# skip straight to another guessed edit without first diagnosing the
+# specific error in front of it.
+FIX_PLAN_INSTRUCTION = (
+    "The build/lint attempt above just failed. Before any tool is "
+    "available to you, write a short plan (2-4 bullet points): what "
+    "specifically the error log says is wrong, and the exact change "
+    "you'll make to fix it. Do not write SystemVerilog code yet — just "
+    "the plan, make sure to keep the signal names consistent with the original code"
+)
+
 
 def build_llm(config: AgentConfig) -> ChatOllama:
     return ChatOllama(
