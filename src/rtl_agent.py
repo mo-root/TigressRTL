@@ -218,6 +218,22 @@ while True:
                     fix_plan_pending = True
                 result = f"{result}\n\n[automatically ran {active_build_tool_name} after {name}]\n{build_result}"
 
+            # The system prompt also tells the model to call the build tool
+            # itself "afterward" — the branch above only updates
+            # build_failed/fix_plan_pending when auto-build ran it, so an
+            # explicit model-requested call (e.g. re-verifying without a
+            # fresh edit) would otherwise leave that state stale: a failure
+            # here would go unnoticed by the retry check below, and the
+            # model could give a final answer right after seeing a failing
+            # build result with nothing forcing a fix. Track it the same
+            # way regardless of who triggered the call.
+            elif name == active_build_tool_name:
+                build_failed = result.startswith(build_failure_prefix)
+                if not build_failed:
+                    build_retry_count = 0
+                else:
+                    fix_plan_pending = True
+
             # Print the tool's actual return value directly — never rely on
             # the model's own later paraphrase of it. Models have been
             # observed confidently misreporting a tool result (e.g.
