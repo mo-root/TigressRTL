@@ -214,6 +214,12 @@ while True:
                 build_failed = build_result.startswith(build_failure_prefix)
                 if not build_failed:
                     build_retry_count = 0
+                    # Cleared here too, not just consumed at the loop top: an
+                    # earlier tool call in this same response may have failed
+                    # and set it, and a "the build just failed" plan for an
+                    # error this build shows as resolved would contradict the
+                    # transcript the model is reading.
+                    fix_plan_pending = False
                 else:
                     fix_plan_pending = True
                 result = f"{result}\n\n[automatically ran {active_build_tool_name} after {name}]\n{build_result}"

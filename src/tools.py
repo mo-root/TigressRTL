@@ -61,7 +61,12 @@ def _truncate_diagnostics(stderr_log: str, max_blocks: int = MAX_DIAG_BLOCKS) ->
     kept, omitted = blocks[:max_blocks], blocks[max_blocks:]
     n_err = sum(1 for b in omitted if _DIAG_IS_ERROR_RE.match(b))
     n_warn = len(omitted) - n_err
-    return "".join(kept) + f"... ({n_err} more error(s), {n_warn} more warning(s) omitted) ...\n"
+    # Text before the first diagnostic (a tool banner, an include-resolution
+    # note) falls outside every block, so it has to be re-attached explicitly
+    # — otherwise it survives an untruncated log but silently vanishes from a
+    # truncated one, which is exactly when context is scarcest.
+    preamble = stderr_log[:starts[0]]
+    return preamble + "".join(kept) + f"... ({n_err} more error(s), {n_warn} more warning(s) omitted) ...\n"
 
 
 def _project_sv_files() -> list[str]:
