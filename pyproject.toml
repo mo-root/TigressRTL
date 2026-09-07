@@ -13,8 +13,19 @@ dependencies = [
     "pyyaml",
 ]
 
+[project.optional-dependencies]
+# Install with `pip install -e ".[dev]"` to run the unit suite in test/.
+dev = ["pytest"]
+
 [tool.setuptools]
 py-modules = ["model", "tools", "rtl_agent", "config"]
 
 [tool.setuptools.package-dir]
 "" = "src"
+
+[tool.pytest.ini_options]
+testpaths = ["test"]
+# run_benchmark.py / run_validation.py live in test/ too, but they are
+# harnesses that drive a real model, not unit tests — only test_*.py files
+# are collected, so a bare `pytest` never tries to run them.
+python_files = ["test_*.py"]

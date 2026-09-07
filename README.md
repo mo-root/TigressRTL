@@ -137,6 +137,28 @@ Settings (model, context window, build-retry cap), the full list of fields,
 and a table of usable models with their maximum context length are
 documented in [`configs/README.md`](configs/README.md).
 
+## Tests
+
+Fast unit tests for the deterministic parts of the agent — config loading
+and validation, the `generated/` path sandbox, the file tools, and
+diagnostic-log truncation. They shell out to nothing and need neither
+Ollama nor a build tool installed, so they run anywhere in well under a
+second:
+
+```bash
+pip install -e ".[dev]"
+pytest
+```
+
+This is a different kind of check from [Benchmarking](#benchmarking) below:
+these tests pin down behavior that must hold regardless of which model is
+running, while the benchmark measures how well a given model actually does.
+Run these before pushing; run the benchmark when you want to compare models.
+
+`test/` also holds `run_benchmark.py` and `run_validation.py`, which drive a
+real model and are not unit tests — `pytest` only collects `test_*.py`, so a
+bare `pytest` never tries to run them.
+
 ## Benchmarking
 
 Two scripts, kept separate since generation and validation are different
@@ -264,6 +286,10 @@ multi-file compile against the actual dataset testbench reflects the truth.
   then a ReAct tool-calling loop that auto-runs the active build tool
   after every write/edit and forces a bounded number of fix attempts
   (`config.max_build_retries`) if a build fails.
+- **`test/test_tools.py`, `test/test_config.py`, `test/conftest.py`** — the
+  unit suite and its shared `sandbox` fixture (which points
+  `tools.GENERATED_DIR` at a temp dir so tests never touch the real
+  `src/generated/`) — see [Tests](#tests) above.
 - **`test/run_benchmark.py`** — sweeps `rtl_agent.py` (one fresh subprocess
   per problem) over the verilog-eval dataset across one or more configs —
   see [Benchmarking](#benchmarking) above.
