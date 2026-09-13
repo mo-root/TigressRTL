@@ -1,0 +1,15 @@
+# Versions the model-behaviour notes in src/config.py were actually observed
+# with. Those notes record which models emit structured tool_calls and which
+# emit fenced JSON instead, and that boundary is partly decided by
+# langchain-ollama: its _parse_arguments_from_tool_call /
+# _get_tool_calls_from_response normalise a response before rtl_agent.py sees
+# it, so the same model against a different version can behave differently.
+#
+# Not a lockfile and not enforced by pyproject.toml, which stays unpinned so
+# the project keeps installing cleanly. Use it to reproduce a recorded result:
+#
+#     pip install -e . -c constraints.txt
+langchain-core==1.6.2
+langchain-ollama==1.1.0
+pydantic==2.13.5
+PyYAML==6.0.3
