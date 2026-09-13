@@ -187,8 +187,10 @@ benchmark_runs/2026-08-04_23-45-28/
 
 If a long sweep gets interrupted, resume it with
 `--resume-dir benchmark_runs/<timestamp>`, which skips any (config, problem)
-pair already marked `"completed"` and retries anything that timed out or
-errored. Without `--resume-dir`, every invocation always starts a fresh
+pair already marked `"completed"` and retries anything else — a `"timeout"`,
+a harness `"error"`, or a `"crashed"` (`rtl_agent.py` exited non-zero, e.g. a
+fatal config problem or an unhandled exception part-way through a problem).
+Without `--resume-dir`, every invocation always starts a fresh
 timestamped directory. See `--help` for `--problems` (filter by name/glob),
 `--timeout` (per-problem subprocess timeout, none by default), and `--python`
 (interpreter to launch `rtl_agent.py` with).

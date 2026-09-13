@@ -142,7 +142,13 @@ def run_one(python: str, config_path: Path, prompt_single_line: str, timeout: fl
         )
         log = proc.stdout + proc.stderr
         returncode = proc.returncode
-        status = "completed"
+        # The returncode decides the status, rather than "the subprocess
+        # returned at all". rtl_agent.py exits non-zero on a fatal config or
+        # environment problem, and dies with a traceback on an unhandled
+        # exception mid-run; both used to be recorded identically to a healthy
+        # run, so a sweep where every single problem crashed printed the same
+        # {'completed': N} summary as one where every problem succeeded.
+        status = "completed" if returncode == 0 else "crashed"
     except subprocess.TimeoutExpired as e:
         log = (e.stdout or "") + (e.stderr or "")
         returncode = None
