@@ -92,6 +92,10 @@ def _structured_system_prompt(build_tool_name: str) -> str:
   assigned inside a procedural block. Use logic.
 - NEVER declare a wire inside an always block.
 - NEVER rename the module. Use the name in the request, character for character.
+- NEVER create a scratch or versioned file (TopModule_v2.sv, test.sv, tmp.sv).
+  Write every revision to the SAME file: {build_tool_name} compiles every .sv in
+  the directory together, so a leftover attempt breaks the build of the real
+  design, and you have no way to delete it afterwards.
 - NEVER claim the code is correct before {build_tool_name} has reported no errors.
 
 ## 2. WORKSPACE
