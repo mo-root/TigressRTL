@@ -1,0 +1,7 @@
+# A/B pair for AgentConfig.system_prompt — identical in every other field, so a
+# sweep over both isolates the prompt shape. See configs/README.md.
+model: devstral-small-2
+num_ctx: 16384
+max_build_retries: 6
+verilog_build_tool: icarus
+system_prompt: prose
