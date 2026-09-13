@@ -1,3 +1,6 @@
+import json
+import re
+
 from langchain_ollama import ChatOllama
 
 from config import AgentConfig
@@ -71,3 +74,69 @@ def build_llm(config: AgentConfig) -> ChatOllama:
         model=config.model,
         num_ctx=config.num_ctx,
     )
+
+
+# A fenced JSON object anywhere in a reply's text. Matched non-greedily and
+# only inside a fence: bare {...} in prose is far too easy to hit on a model
+# narrating what it is about to do, or emitting a status object after the
+# fact, and executing that would be worse than missing a call.
+_FENCED_JSON_RE = re.compile(r"```(?:json|tool_code)?\s*(\{.*?\})\s*```", re.DOTALL)
+
+# Keys different models use for the same thing. "arguments" is what the
+# OpenAI-style function-calling schema uses and is what the DeepSeek and Qwen
+# coder models emit; "args" is langchain's own spelling; "parameters" shows up
+# in Gemini-flavoured templates.
+_ARG_KEYS = ("arguments", "args", "parameters", "input")
+
+
+def recover_tool_calls(text: str, valid_names) -> tuple[list[dict], str]:
+    """Pull tool calls a model wrote as fenced JSON text out of `text`.
+
+    Returns (calls, text_without_the_consumed_fences). `calls` is in the shape
+    rtl_agent.py already expects from AIMessage.tool_calls, minus the id.
+
+    Some tool-capable models emit a correct call as a ```json block in the
+    reply body instead of as a structured tool_call, which leaves
+    response.tool_calls empty and makes the agent read a turn that intended to
+    write a file as its final answer. See the model notes in config.py: with a
+    tool-enabling Modelfile but no system prompt, deepseek-coder-v2 emits
+    structured calls 4/4; with this project's system prompt in the message
+    list, it emits fenced JSON instead. qwen2.5-coder fails the same way.
+
+    Deliberately conservative, because anything recovered here gets executed:
+    the JSON must be fenced, parse to an object, carry a "name" that is an
+    actually-bound tool, and carry a mapping of arguments. Anything else is
+    left alone.
+    """
+    calls, consumed = [], []
+    for match in _FENCED_JSON_RE.finditer(text or ""):
+        try:
+            payload = json.loads(match.group(1))
+        except ValueError:
+            continue
+        # Some templates wrap the call one level down.
+        if isinstance(payload, dict) and len(payload) == 1:
+            inner = next(iter(payload.values()))
+            if isinstance(inner, dict) and "name" in inner:
+                payload = inner
+        if not isinstance(payload, dict):
+            continue
+        name = payload.get("name")
+        if name not in valid_names:
+            continue
+        args = next(
+            (payload[k] for k in _ARG_KEYS if isinstance(payload.get(k), dict)), None
+        )
+        if args is None:
+            continue
+        calls.append({"name": name, "args": args})
+        consumed.append(match.span())
+
+    # Strip what was consumed. Leaving it behind would keep a worked example of
+    # the wrong output format in `messages` for the rest of the session, on a
+    # transcript that is never trimmed, re-priming the behaviour being
+    # recovered from.
+    cleaned = text or ""
+    for start, end in reversed(consumed):
+        cleaned = cleaned[:start] + cleaned[end:]
+    return calls, cleaned.strip()
