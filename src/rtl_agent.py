@@ -188,11 +188,35 @@ while True:
             name = call["name"]
             print("[Action]", name, call["args"])
 
-            # TOOL_FUNCTIONS[name] is a StructuredTool object (from @tool),
-            # not a plain function — it must be called via .invoke(args),
-            # passing the whole args dict, not unpacked as **args.
-            tool_fn = TOOL_FUNCTIONS[name]
-            result = tool_fn.invoke(call["args"])
+            # A tool call the harness can't service is answered, not raised.
+            # `TOOL_FUNCTIONS[name]` and `.invoke(args)` are both reachable
+            # with model-supplied values: a hallucinated name is a KeyError,
+            # and a missing or misspelled argument is a pydantic
+            # ValidationError. Either one used to end the process with a
+            # traceback, losing the whole turn's work over something the
+            # model could have corrected if it had been told — and in the
+            # benchmark harness it ends that problem entirely. Turning both
+            # into an ordinary tool result keeps the ReAct loop closed: the
+            # model sees what went wrong, and the existing retry machinery
+            # gets a chance to act on it.
+            tool_fn = TOOL_FUNCTIONS.get(name)
+            if tool_fn is None:
+                result = (
+                    f"No tool named '{name}'. Available tools: "
+                    f"{', '.join(sorted(TOOL_FUNCTIONS))}."
+                )
+            else:
+                try:
+                    result = tool_fn.invoke(call["args"])
+                except Exception as e:
+                    # Deliberately broad: this is the boundary between
+                    # model-supplied arguments and real code, so the useful
+                    # question is "did the call work", not which of pydantic's
+                    # or a tool's exception types came back. The tools already
+                    # return strings for their own expected failures (file not
+                    # found, build error), so anything landing here is a
+                    # malformed call rather than a tool doing its job.
+                    result = f"Tool '{name}' could not be called: {type(e).__name__}: {e}"
 
             # Enforcement, not a request: the system prompt asks the model to
             # always build after writing, but that isn't reliable — models
