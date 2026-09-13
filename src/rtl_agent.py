@@ -6,7 +6,9 @@ from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage
 
 from config import DEFAULT_CONFIG_PATH, load_config
 from model import build_llm, build_system_prompt, FIX_PLAN_INSTRUCTION, PLANNING_INSTRUCTION
-from tools import BASE_TOOLS, BUILD_FAILURE_PREFIXES, BUILD_TOOL_FUNCTIONS
+from tools import (
+    BASE_TOOLS, BUILD_FAILURE_PREFIXES, BUILD_TOOL_FUNCTIONS, missing_build_backend,
+)
 
 # Windows terminals default to a codepage that can't render some characters —
 # force UTF-8 output so nothing gets garbled.
@@ -46,6 +48,17 @@ if args.model:
     # A one-off override shouldn't require writing a new YAML file — this
     # takes precedence over whatever the config file says.
     config = dataclasses.replace(config, model=args.model)
+
+# Fail closed before any model work happens. A missing backend binary is the
+# one build failure the agent cannot see: the tool's "not installed" string
+# doesn't match BUILD_FAILURE_PREFIXES, so auto-build reads it as a clean
+# build and the entire build-and-fix loop quietly does nothing for the rest
+# of the run — see missing_build_backend() in tools.py. Better to refuse to
+# start than to spend a run producing unverified RTL that reports success.
+backend_problem = missing_build_backend(config.verilog_build_tool)
+if backend_problem:
+    print(f"\nError: {backend_problem}")
+    sys.exit(1)
 
 # config.verilog_build_tool selects exactly one build/lint backend to bind
 # to the model — never both, since the point is picking one, not offering

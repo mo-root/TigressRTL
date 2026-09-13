@@ -345,3 +345,51 @@ BUILD_FAILURE_PREFIXES = {
     "slang": "Lint failed",
 }
 
+# The executable each backend shells out to. Resolved from the same constants
+# the tools themselves use rather than re-deriving the PATH lookup, so this
+# answers "would the active build tool actually find its binary?" and cannot
+# drift from the answer.
+BUILD_TOOL_BINARIES = {
+    "icarus": IVERILOG_PATH,
+    "slang": SLANG_PATH,
+}
+
+
+def missing_build_backend(name: str) -> str | None:
+    """Why `name`'s executable can't be run, or None if it can be.
+
+    Worth checking once up front rather than letting it surface per-build:
+    when the binary is missing, build_verilog/lint_verilog return their
+    "not installed" string, which does not start with the backend's
+    BUILD_FAILURE_PREFIXES entry. rtl_agent.py's auto-build tests that prefix
+    to decide whether a build failed, so a missing backend reads as a *clean
+    build* — no fix-plan, no retries, and a run that reports success having
+    never compiled anything. Failing closed at startup is the only point
+    where that is still distinguishable from a design that simply works.
+    """
+    def _runnable(backend: str) -> bool:
+        binary = BUILD_TOOL_BINARIES[backend]
+        # Executability, not mere existence: shutil.which() accepts an absolute
+        # path and applies the same exec test the shell would, and the second
+        # arm covers the Windows fallback paths. A plain os.path.exists() would
+        # pass a directory named "slang" in the working directory, or a
+        # non-executable file at the fallback path, and the gate would then wave
+        # through a backend that raises the moment subprocess tries to run it.
+        return bool(shutil.which(binary)) or (
+            os.path.isfile(binary) and os.access(binary, os.X_OK)
+        )
+
+    if _runnable(name):
+        return None
+    # Only suggest backends actually present — naming every option here would
+    # include the one that just failed, which is what the user already tried.
+    available = sorted(b for b in BUILD_TOOL_FUNCTIONS if _runnable(b))
+    alternative = (
+        f"switch verilog_build_tool to {' or '.join(available)}" if available
+        else "no other configured backend is installed either"
+    )
+    return (
+        f"build backend '{name}' is selected (verilog_build_tool in your config), but its "
+        f"executable '{BUILD_TOOL_BINARIES[name]}' is not on PATH.\n"
+        f"Install it, or {alternative}."
+    )
