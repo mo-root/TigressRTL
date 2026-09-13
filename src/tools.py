@@ -39,7 +39,16 @@ SLANG_PATH = shutil.which("slang") or (
 # does not match "note:" — a note is auxiliary info tied to the block
 # before it (e.g. "previous definition here"), so it stays folded into
 # that block instead of eating one of the kept slots.
-_DIAG_START_RE = re.compile(r"^\S+:\d+(?::\d+)?:\s*(?:(error|warning)\b|syntax error\b)", re.MULTILINE)
+# "sorry:" is icarus's third diagnostic verb, for a construct it parsed but
+# won't fully support (e.g. "sorry: constant selects in always_* processes are
+# not fully supported"). It is emitted on *successful* builds, one line per
+# occurrence. Despite the wording of that message, only always_comb and
+# always_latch trigger it — the two forms whose sensitivity list iverilog
+# infers — and only for a constant bit-select read as an r-value; always_ff,
+# always @(*) and an explicit sensitivity list do not. Unmatched here, a
+# design that does hit it bypassed truncation entirely.
+_DIAG_START_RE = re.compile(
+    r"^\S+:\d+(?::\d+)?:\s*(?:(error|warning|sorry)\b|syntax error\b)", re.MULTILINE)
 _DIAG_IS_ERROR_RE = re.compile(r"^\S+:\d+(?::\d+)?:\s*(error\b|syntax error\b)")
 MAX_DIAG_BLOCKS = 6
 
@@ -58,10 +67,30 @@ def _truncate_diagnostics(stderr_log: str, max_blocks: int = MAX_DIAG_BLOCKS) ->
         return stderr_log
     bounds = starts + [len(stderr_log)]
     blocks = [stderr_log[bounds[i]:bounds[i + 1]] for i in range(len(starts))]
-    kept, omitted = blocks[:max_blocks], blocks[max_blocks:]
-    n_err = sum(1 for b in omitted if _DIAG_IS_ERROR_RE.match(b))
-    n_warn = len(omitted) - n_err
-    return "".join(kept) + f"... ({n_err} more error(s), {n_warn} more warning(s) omitted) ...\n"
+
+    # Errors claim the kept slots first. Keeping simply the first N blocks was
+    # fine while only errors and warnings matched, but icarus emits its "sorry:"
+    # notes while elaborating a process — i.e. before an error raised by a later
+    # process — so a design with a handful of them could push every actual error
+    # out of the log. That leaves the model with a "Compilation failed" verdict
+    # and nothing to act on, and FIX_PLAN_INSTRUCTION then asks it what the
+    # error log says while the error log contains no error.
+    #
+    # Selection is by priority; emission stays in source order, so the log still
+    # reads the way the compiler wrote it (and the trailing "N error(s) during
+    # elaboration." line stays attached to the last error block, where icarus
+    # put it).
+    is_error = [bool(_DIAG_IS_ERROR_RE.match(b)) for b in blocks]
+    order = [i for i in range(len(blocks)) if is_error[i]]
+    order += [i for i in range(len(blocks)) if not is_error[i]]
+    kept = set(order[:max_blocks])
+
+    n_err = sum(1 for i in range(len(blocks)) if i not in kept and is_error[i])
+    n_other = len(blocks) - len(kept) - n_err
+    return (
+        "".join(blocks[i] for i in sorted(kept))
+        + f"... ({n_err} more error(s), {n_other} more warning/note(s) omitted) ...\n"
+    )
 
 
 def _project_sv_files() -> list[str]:
@@ -190,8 +219,18 @@ def build_verilog(file_path: str) -> str:
         )
         log = (result.stdout + _truncate_diagnostics(result.stderr)).strip()
 
+        # The verdict is stated unconditionally, never implied by the absence
+        # of a log. Icarus exits 0 while still writing to stderr — "sorry:"
+        # lines for unsupported constructs are the common case, and any
+        # constant bit-select inside an always_* block triggers one — so
+        # returning `log` alone handed the model a wall of diagnostics with no
+        # indication the build had actually passed, while rtl_agent.py's
+        # auto-build (which tests the failure prefix, not the log) recorded a
+        # success. Model and harness disagreed about the same build.
         if result.returncode == 0:
-            return log or "Compiled successfully — no errors or warnings."
+            if not log:
+                return "Compiled successfully — no errors or warnings."
+            return f"Compiled successfully, with diagnostics:\n{log}"
         return f"Compilation failed (exit code {result.returncode}):\n{log}"
 
     except FileNotFoundError:
@@ -236,11 +275,14 @@ def lint_verilog(file_path: str) -> str:
 
         # Unlike Icarus, slang always prints a "Build succeeded: N errors,
         # M warnings" summary line even on success, so `log` is virtually
-        # never empty here — that's fine, it's more informative than
-        # build_verilog's silent-on-success behavior (it surfaces warning
-        # counts even when the build passes).
+        # never empty here. That summary is informative, but on its own it
+        # still left the model to infer the verdict from log text; the
+        # success sentence is now always present, for the same reason as in
+        # build_verilog above.
         if result.returncode == 0:
-            return log or "Linted successfully — no errors or warnings."
+            if not log:
+                return "Linted successfully — no errors or warnings."
+            return f"Linted successfully, with diagnostics:\n{log}"
         return f"Lint failed (exit code {result.returncode}):\n{log}"
 
     except FileNotFoundError:
@@ -302,3 +344,4 @@ BUILD_FAILURE_PREFIXES = {
     "icarus": "Compilation failed",
     "slang": "Lint failed",
 }
+
