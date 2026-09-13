@@ -53,6 +53,19 @@ class AgentConfig:
     # they're never both exposed together.
     verilog_build_tool: str = "icarus"
 
+    # Which shape of system prompt to send: "prose", the single paragraph this
+    # project has always used, or "structured", the same rules laid out as an
+    # agent-skill document (prohibitions, workspace, workflow with code
+    # templates, a compiler-error table). See model.py for both.
+    #
+    # A config field rather than a code edit so the two can be swept against
+    # each other directly -- `run_benchmark.py --configs prose.yaml
+    # structured.yaml` runs the whole problem set under each and writes them to
+    # separate result directories. Defaults to "prose": the structured prompt
+    # is ~1,000 tokens against ~390, which is real cost on a 16384 context, and
+    # nothing has yet measured that a small local model follows it any better.
+    system_prompt: str = "prose"
+
     def __post_init__(self):
         # Not imported from tools.py's BUILD_TOOL_FUNCTIONS keys on purpose —
         # that would pull langchain_core/subprocess into config.py just for
@@ -62,6 +75,10 @@ class AgentConfig:
         if self.verilog_build_tool not in ("icarus", "slang"):
             raise ValueError(
                 f"verilog_build_tool must be 'icarus' or 'slang', got {self.verilog_build_tool!r}"
+            )
+        if self.system_prompt not in ("prose", "structured"):
+            raise ValueError(
+                f"system_prompt must be 'prose' or 'structured', got {self.system_prompt!r}"
             )
 
 

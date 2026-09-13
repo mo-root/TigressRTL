@@ -71,7 +71,8 @@ llm_with_tools = llm.bind_tools(TOOLS)
 #   HumanMessage(...)  - you
 #   AIMessage(...)     - the model's turn (may carry .tool_calls)
 #   ToolMessage(...)   - a tool's result, tagged with which call it answers
-messages = [SystemMessage(content=build_system_prompt(active_build_tool_name))]
+messages = [SystemMessage(
+    content=build_system_prompt(active_build_tool_name, config.system_prompt))]
 
 print("Chatting with", config.model, "— a SystemVerilog RTL design assistant.")
 print("Type 'exit' or 'quit' to stop.\n")

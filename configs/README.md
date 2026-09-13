@@ -9,6 +9,7 @@ fields defined by `AgentConfig` in `src/config.py`:
 | `num_ctx` | `8192` | Context window size, in tokens, given to Ollama. Can be set anywhere up to the chosen model's maximum context length (see table below) — larger values use more RAM/VRAM and run slower. |
 | `max_build_retries` | `3` | How many times the agent is forced to retry after a build failure it didn't actually fix, before giving up for that turn. Any non-negative integer. |
 | `verilog_build_tool` | `icarus` | Which build/lint backend the agent's build tool uses: `icarus` (Icarus Verilog, a real compiler — `build_verilog`) or `slang` (sv-lang.com, a stricter linter — `lint_verilog`). Exactly one is bound to the model at a time, never both. An invalid value raises a clear error immediately. See [Build tools](#build-tools) below. |
+| `system_prompt` | `prose` | Which shape of system prompt to send. `prose` is the single paragraph this project has always used (~390 tokens). `structured` carries the same rules as an agent-skill document — prohibitions, workspace, a workflow with literal `always_comb`/`always_ff` templates, a compiler-error-to-fix table, and a list of mistakes the compiler stays silent about (~1,000 tokens). Sweep `configs/prompt-prose.yaml` against `configs/prompt-structured.yaml` to compare them; nothing has measured which a small local model follows better. |
 
 To run an experiment with different settings, copy `default.yaml`, edit the
 copy, and pass it via `--config` (e.g. `--config configs/my-experiment.yaml`).
