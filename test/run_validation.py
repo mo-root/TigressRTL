@@ -24,6 +24,12 @@ VVP_PATH = shutil.which("vvp") or r"C:\iverilog\bin\vvp.exe"
 # for whether the DUT matched the reference module.
 MISMATCH_RE = re.compile(r"Mismatches:\s*(\d+)\s+in\s+(\d+)\s+samples")
 
+# Top-level module of every verilog-eval testbench — passed to iverilog as the
+# elaboration root so nothing the agent left in generated/ can also run. All
+# 156 dataset_spec-to-rtl/*_test.sv files declare exactly `module tb` (plus a
+# `stimulus_gen` that tb instantiates).
+DATASET_TB_MODULE = "tb"
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -114,9 +120,23 @@ def validate_problem(problem: str, problem_dir: Path, dataset_dir: Path, timeout
         return result, ""
 
     sim_vvp = problem_dir / "sim.vvp"
-    compile_cmd = [IVERILOG_PATH, "-g2012", "-o", str(sim_vvp), str(test_file), str(ref_file)] + [
-        str(f) for f in generated_files
-    ]
+    # -s names the root module to elaborate. Without it iverilog elaborates
+    # *every* module with no parent, which includes any testbench the agent
+    # wrote alongside its design — and src/tools.py's _project_sv_files()
+    # exists precisely so the agent can do that. A stray testbench's `initial`
+    # block then runs concurrently with the dataset's, and its $finish ends
+    # the simulation early: the dataset testbench's `final` block fires on any
+    # $finish, so it prints its summary line over however many samples had
+    # accumulated by then, and the design is scored on a fraction of the
+    # stimulus. Rooting at the dataset testbench leaves an unreferenced module
+    # unelaborated, so it cannot run at all. All 156 spec-to-rtl testbenches
+    # declare `module tb` (verified against NVlabs/verilog-eval), and a design
+    # legitimately split across several files is still reached, since tb
+    # instantiates TopModule and TopModule instantiates the rest.
+    compile_cmd = [
+        IVERILOG_PATH, "-g2012", "-s", DATASET_TB_MODULE, "-o", str(sim_vvp),
+        str(test_file), str(ref_file),
+    ] + [str(f) for f in generated_files]
     returncode, log, timed_out = run_step(compile_cmd, problem_dir, timeout)
     log_parts.append("=== compile ===\n" + log)
     if timed_out:
@@ -152,6 +172,13 @@ def validate_problem(problem: str, problem_dir: Path, dataset_dir: Path, timeout
     mismatches, samples = int(match.group(1)), int(match.group(2))
     result["mismatches"] = mismatches
     result["samples"] = samples
+    if samples == 0:
+        # Belt and braces behind the -s root above: "0 mismatches in 0 samples"
+        # is absence of evidence, not evidence of a pass, whatever ended the
+        # simulation early. "unknown" is already the bucket for output we can't
+        # draw a verdict from, and it's counted rather than dropped.
+        result["status"] = "unknown"
+        return result, "\n".join(log_parts)
     result["status"] = "pass" if mismatches == 0 else "fail"
     return result, "\n".join(log_parts)
 
