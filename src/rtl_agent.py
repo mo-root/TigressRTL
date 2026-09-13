@@ -5,7 +5,10 @@ import sys
 from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage
 
 from config import DEFAULT_CONFIG_PATH, load_config
-from model import build_llm, build_system_prompt, FIX_PLAN_INSTRUCTION, PLANNING_INSTRUCTION
+from model import (
+    build_llm, build_system_prompt, recover_tool_calls,
+    FIX_PLAN_INSTRUCTION, PLANNING_INSTRUCTION,
+)
 from tools import (
     BASE_TOOLS, BUILD_FAILURE_PREFIXES, BUILD_TOOL_FUNCTIONS, missing_build_backend,
 )
@@ -42,6 +45,11 @@ def accumulate_tokens(totals: dict, response) -> None:
 # process-lifetime total is already a per-problem total — no extra
 # scoping needed.
 token_totals = {"input_tokens": 0, "output_tokens": 0}
+
+# Monotonic across the whole session. A tool_call_id has to be unique
+# within the transcript, not just within a turn, so this cannot be keyed
+# off any counter that resets per turn.
+recovered_call_count = 0
 
 config = load_config(args.config)
 if args.model:
@@ -171,6 +179,24 @@ while True:
                 sys.exit(1)
             raise
         accumulate_tokens(token_totals, response)
+
+        # Recover a call the model wrote as fenced JSON text instead of as a
+        # structured tool_call. This has to happen BEFORE the message is
+        # appended: the ToolMessages produced further down are tagged with a
+        # tool_call_id, and that id has to match a tool_call on the assistant
+        # turn already in `messages`, or the transcript is malformed from here
+        # on. Mutating `response` in place keeps the two in step.
+        if not response.tool_calls:
+            recovered, cleaned = recover_tool_calls(response.content, TOOL_FUNCTIONS)
+            if recovered:
+                for call in recovered:
+                    call["id"] = f"recovered_{recovered_call_count}"
+                    recovered_call_count += 1
+                response.tool_calls = recovered
+                response.content = cleaned
+                print(f"[Recovered] {len(recovered)} tool call(s) parsed out of the "
+                      "reply text — the model emitted fenced JSON instead of a tool call.")
+
         messages.append(response)
 
         # `response.tool_calls` is a list of dicts:
